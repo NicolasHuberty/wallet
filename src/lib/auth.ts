@@ -3,6 +3,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 
+// Avoid better-auth default-secret crash during Next's build-time module eval
+// when BETTER_AUTH_SECRET isn't set. Runtime always gets the real value.
+const BUILD_PLACEHOLDER_SECRET = "build-placeholder-secret-32-chars-aaaaaaaa";
+
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -13,7 +17,7 @@ export const auth = betterAuth({
       verification: schema.verification,
     },
   }),
-  secret: process.env.BETTER_AUTH_SECRET,
+  secret: process.env.BETTER_AUTH_SECRET ?? BUILD_PLACEHOLDER_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
   emailAndPassword: {
     enabled: true,
