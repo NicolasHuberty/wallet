@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFParse } from "pdf-parse";
+import { extractText, getDocumentProxy } from "unpdf";
 import { parseAmortizationPDFText } from "@/lib/pdf-amortization";
 
 export const runtime = "nodejs";
@@ -23,11 +23,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Date invalide" }, { status: 400 });
     }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    const parser = new PDFParse({ data: buf });
-    const result0 = await parser.getText();
-    const text = result0.text ?? "";
-    const pageCount = result0.pages?.length ?? 1;
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const doc = await getDocumentProxy(buf);
+    const { text: pageTexts, totalPages } = await extractText(doc, {
+      mergePages: false,
+    });
+    const textArray = Array.isArray(pageTexts) ? pageTexts : [pageTexts as unknown as string];
+    const text = textArray.join("\n\f\n");
 
     const result = parseAmortizationPDFText(text, startDate);
 
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
       })),
       warnings: result.warnings,
       detectedFormat: result.detectedFormat,
-      pageCount,
+      pageCount: totalPages ?? 1,
       textLength: text.length,
     });
   } catch (e) {
