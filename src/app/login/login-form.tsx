@@ -47,8 +47,10 @@ export function LoginForm({
           return;
         }
         toast.success("Connecté");
-        router.push(from || "/dashboard");
-        router.refresh();
+        // Full navigation: ensures the new session cookie is sent on the
+        // next request (router.push keeps the same browsing session and
+        // can race with the Set-Cookie from better-auth).
+        window.location.href = from || "/dashboard";
       } catch (e) {
         toast.error((e as Error).message ?? "Connexion impossible");
       }

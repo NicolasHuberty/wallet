@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   getPrimaryHousehold,
   getNetWorth,
@@ -8,6 +9,7 @@ import {
   getAccountSnapshots,
   getCharges,
 } from "@/lib/queries";
+import { DEMO_MODE } from "@/lib/demo";
 import { PageHeader } from "@/components/page-header";
 import { KpiCard } from "@/components/kpi-card";
 import { NetWorthChart } from "@/components/net-worth-chart";
@@ -20,6 +22,11 @@ import { ArrowUpRight, ClipboardCheck, Receipt, TrendingDown, TrendingUp } from 
 
 export default async function DashboardPage() {
   const h = await getPrimaryHousehold();
+  // First-run: no accounts → onboarding (skip in demo mode, demo has data).
+  if (!DEMO_MODE) {
+    const firstCheck = await getAccounts(h.id);
+    if (firstCheck.length === 0) redirect("/onboarding");
+  }
   const nw = await getNetWorth(h.id);
   const cashflow = await getMonthlyCashflow(h.id);
   const snapshots = await getSnapshots(h.id);

@@ -52,8 +52,8 @@ export function SignupForm({
           return;
         }
         toast.success("Compte créé");
-        router.push(from || "/dashboard");
-        router.refresh();
+        // Full navigation so the session cookie is included on the next request.
+        window.location.href = from || "/onboarding";
       } catch (e) {
         toast.error((e as Error).message ?? "Inscription impossible");
       }
