@@ -1,0 +1,485 @@
+import {
+  pgTable,
+  text,
+  integer,
+  real,
+  timestamp,
+  boolean,
+} from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+import { nanoid } from "nanoid";
+
+const id = () =>
+  text("id")
+    .primaryKey()
+    .$defaultFn(() => nanoid(12));
+const timestamps = {
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .$defaultFn(() => new Date()),
+};
+
+// ────────────────────────────────────────────────────────────────────
+// better-auth tables
+// ────────────────────────────────────────────────────────────────────
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  image: text("image"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const authAccount = pgTable("auth_account", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  accountId: text("account_id").notNull(),
+  providerId: text("provider_id").notNull(),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  idToken: text("id_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const verification = pgTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ────────────────────────────────────────────────────────────────────
+// Business domain tables
+// ────────────────────────────────────────────────────────────────────
+
+export const household = pgTable("household", {
+  id: id(),
+  userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  baseCurrency: text("base_currency").notNull().default("EUR"),
+  ...timestamps,
+});
+
+export const member = pgTable("member", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  email: text("email"),
+  color: text("color").notNull().default("#6366f1"),
+  ...timestamps,
+});
+
+export const accountKind = [
+  "cash",
+  "savings",
+  "brokerage",
+  "retirement",
+  "real_estate",
+  "loan",
+  "credit_card",
+  "crypto",
+  "other_asset",
+] as const;
+export type AccountKind = (typeof accountKind)[number];
+
+export const ownership = ["shared", "member"] as const;
+
+export const account = pgTable("account", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: text("kind", { enum: accountKind }).notNull(),
+  institution: text("institution"),
+  currency: text("currency").notNull().default("EUR"),
+  currentValue: real("current_value").notNull().default(0),
+  ownership: text("ownership", { enum: ownership }).notNull().default("shared"),
+  ownerMemberId: text("owner_member_id").references(() => member.id, {
+    onDelete: "set null",
+  }),
+  sharedSplitPct: real("shared_split_pct"),
+  annualYieldPct: real("annual_yield_pct"),
+  monthlyContribution: real("monthly_contribution"),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+export const holding = pgTable("holding", {
+  id: id(),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => account.id, { onDelete: "cascade" }),
+  ticker: text("ticker").notNull(),
+  name: text("name"),
+  isin: text("isin"),
+  allocationPct: real("allocation_pct"),
+  quantity: real("quantity").notNull().default(0),
+  avgCost: real("avg_cost").notNull().default(0),
+  currentPrice: real("current_price").notNull().default(0),
+  currency: text("currency").notNull().default("EUR"),
+  ...timestamps,
+});
+
+export const dcaFrequency = ["weekly", "biweekly", "monthly", "quarterly"] as const;
+
+export const dcaPlan = pgTable("dca_plan", {
+  id: id(),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => account.id, { onDelete: "cascade" }),
+  ticker: text("ticker").notNull(),
+  amount: real("amount").notNull(),
+  frequency: text("frequency", { enum: dcaFrequency }).notNull().default("monthly"),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  nextDate: timestamp("next_date", { withTimezone: true }),
+  active: boolean("active").notNull().default(true),
+  ...timestamps,
+});
+
+export const property = pgTable("property", {
+  id: id(),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => account.id, { onDelete: "cascade" }),
+  address: text("address"),
+  purchasePrice: real("purchase_price").notNull(),
+  purchaseDate: timestamp("purchase_date", { withTimezone: true }).notNull(),
+  currentValue: real("current_value").notNull(),
+  annualAppreciationPct: real("annual_appreciation_pct").notNull().default(2),
+  monthlyFees: real("monthly_fees").notNull().default(0),
+  surfaceSqm: real("surface_sqm"),
+  ...timestamps,
+});
+
+export const mortgage = pgTable("mortgage", {
+  id: id(),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => account.id, { onDelete: "cascade" }),
+  propertyId: text("property_id").references(() => property.id, { onDelete: "set null" }),
+  lender: text("lender"),
+  principal: real("principal").notNull(),
+  interestRatePct: real("interest_rate_pct").notNull(),
+  termMonths: integer("term_months").notNull(),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  monthlyPayment: real("monthly_payment").notNull(),
+  remainingBalance: real("remaining_balance").notNull(),
+  ...timestamps,
+});
+
+export const amortizationEntry = pgTable("amortization_entry", {
+  id: id(),
+  mortgageId: text("mortgage_id")
+    .notNull()
+    .references(() => mortgage.id, { onDelete: "cascade" }),
+  dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
+  payment: real("payment").notNull(),
+  principal: real("principal").notNull(),
+  interest: real("interest").notNull(),
+  balance: real("balance").notNull(),
+  ...timestamps,
+});
+
+export const expenseCategory = [
+  "housing",
+  "utilities",
+  "food",
+  "transport",
+  "insurance",
+  "subscriptions",
+  "leisure",
+  "health",
+  "childcare",
+  "taxes",
+  "other",
+] as const;
+
+export const recurringExpense = pgTable("recurring_expense", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  category: text("category", { enum: expenseCategory }).notNull(),
+  amount: real("amount").notNull(),
+  ownership: text("ownership", { enum: ownership }).notNull().default("shared"),
+  ownerMemberId: text("owner_member_id").references(() => member.id, {
+    onDelete: "set null",
+  }),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+// Per-month actual amount logged at each check-in for a recurring expense.
+export const recurringExpenseActual = pgTable("recurring_expense_actual", {
+  id: id(),
+  expenseId: text("expense_id")
+    .notNull()
+    .references(() => recurringExpense.id, { onDelete: "cascade" }),
+  month: text("month").notNull(), // YYYY-MM
+  amount: real("amount").notNull(),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+export const incomeCategory = ["salary", "freelance", "dividends", "rent", "other"] as const;
+
+export const recurringIncome = pgTable("recurring_income", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  category: text("category", { enum: incomeCategory }).notNull(),
+  amount: real("amount").notNull(),
+  ownership: text("ownership", { enum: ownership }).notNull().default("member"),
+  ownerMemberId: text("owner_member_id").references(() => member.id, {
+    onDelete: "set null",
+  }),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+// Catégories pour revenus exceptionnels (one-off)
+export const oneOffIncomeCategory = [
+  "bonus",
+  "freelance",
+  "gift",
+  "refund",
+  "tax_refund",
+  "dividend",
+  "sale",
+  "inheritance",
+  "other",
+] as const;
+export type OneOffIncomeCategory = (typeof oneOffIncomeCategory)[number];
+
+export const oneOffIncome = pgTable("one_off_income", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  date: timestamp("date", { withTimezone: true }).notNull(),
+  label: text("label").notNull(),
+  category: text("category", { enum: oneOffIncomeCategory }).notNull(),
+  amount: real("amount").notNull(),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+export const incomeTemplate = pgTable("income_template", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  category: text("category", { enum: oneOffIncomeCategory }).notNull(),
+  defaultAmount: real("default_amount"),
+  notes: text("notes"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  ...timestamps,
+});
+
+export const chargeCategory = [
+  "notary",
+  "registration_tax",
+  "credit_fees",
+  "expertise",
+  "mortgage_insurance",
+  "renovation",
+  "furniture",
+  "moving",
+  "inheritance_tax",
+  "legal",
+  "tax",
+  "other",
+] as const;
+export type ChargeCategory = (typeof chargeCategory)[number];
+
+export const oneOffCharge = pgTable("one_off_charge", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  date: timestamp("date", { withTimezone: true }).notNull(),
+  label: text("label").notNull(),
+  category: text("category", { enum: chargeCategory }).notNull(),
+  amount: real("amount").notNull(),
+  accountId: text("account_id").references(() => account.id, { onDelete: "set null" }),
+  propertyId: text("property_id").references(() => property.id, { onDelete: "set null" }),
+  includeInCostBasis: boolean("include_in_cost_basis").notNull().default(true),
+  notes: text("notes"),
+  ...timestamps,
+});
+
+// Reusable one-off charge template (so the user can re-create common items easily).
+export const chargeTemplate = pgTable("charge_template", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  category: text("category", { enum: chargeCategory }).notNull(),
+  defaultAmount: real("default_amount"),
+  notes: text("notes"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  ...timestamps,
+});
+
+export const oneOffChargeRelations = relations(oneOffCharge, ({ one }) => ({
+  household: one(household, {
+    fields: [oneOffCharge.householdId],
+    references: [household.id],
+  }),
+  account: one(account, {
+    fields: [oneOffCharge.accountId],
+    references: [account.id],
+  }),
+  property: one(property, {
+    fields: [oneOffCharge.propertyId],
+    references: [property.id],
+  }),
+}));
+
+export const accountSnapshot = pgTable("account_snapshot", {
+  id: id(),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => account.id, { onDelete: "cascade" }),
+  date: timestamp("date", { withTimezone: true }).notNull(),
+  value: real("value").notNull(),
+  ...timestamps,
+});
+
+export const netWorthSnapshot = pgTable("net_worth_snapshot", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  date: timestamp("date", { withTimezone: true }).notNull(),
+  totalAssets: real("total_assets").notNull(),
+  totalLiabilities: real("total_liabilities").notNull(),
+  netWorth: real("net_worth").notNull(),
+  breakdown: text("breakdown"),
+  ...timestamps,
+});
+
+export const projectionScenario = pgTable("projection_scenario", {
+  id: id(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => household.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  inflationPct: real("inflation_pct").notNull().default(2),
+  stockReturnPct: real("stock_return_pct").notNull().default(6),
+  cashReturnPct: real("cash_return_pct").notNull().default(2),
+  propertyAppreciationPct: real("property_appreciation_pct").notNull().default(2),
+  horizonYears: integer("horizon_years").notNull().default(30),
+  isDefault: boolean("is_default").notNull().default(false),
+  ...timestamps,
+});
+
+export const householdRelations = relations(household, ({ many }) => ({
+  members: many(member),
+  accounts: many(account),
+  recurringExpenses: many(recurringExpense),
+  recurringIncomes: many(recurringIncome),
+  projections: many(projectionScenario),
+}));
+
+export const accountRelations = relations(account, ({ one, many }) => ({
+  household: one(household, {
+    fields: [account.householdId],
+    references: [household.id],
+  }),
+  ownerMember: one(member, {
+    fields: [account.ownerMemberId],
+    references: [member.id],
+  }),
+  holdings: many(holding),
+  dcaPlans: many(dcaPlan),
+  property: one(property, {
+    fields: [account.id],
+    references: [property.accountId],
+  }),
+  mortgage: one(mortgage, {
+    fields: [account.id],
+    references: [mortgage.accountId],
+  }),
+}));
+
+export const memberRelations = relations(member, ({ one }) => ({
+  household: one(household, {
+    fields: [member.householdId],
+    references: [household.id],
+  }),
+}));
+
+export const holdingRelations = relations(holding, ({ one }) => ({
+  account: one(account, {
+    fields: [holding.accountId],
+    references: [account.id],
+  }),
+}));
+
+export const dcaPlanRelations = relations(dcaPlan, ({ one }) => ({
+  account: one(account, {
+    fields: [dcaPlan.accountId],
+    references: [account.id],
+  }),
+}));
+
+export const propertyRelations = relations(property, ({ one }) => ({
+  account: one(account, {
+    fields: [property.accountId],
+    references: [account.id],
+  }),
+}));
+
+export const mortgageRelations = relations(mortgage, ({ one, many }) => ({
+  account: one(account, {
+    fields: [mortgage.accountId],
+    references: [account.id],
+  }),
+  property: one(property, {
+    fields: [mortgage.propertyId],
+    references: [property.id],
+  }),
+  entries: many(amortizationEntry),
+}));

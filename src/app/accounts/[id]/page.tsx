@@ -1,0 +1,356 @@
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+import {
+  getAccount,
+  getAccountSnapshots,
+  getHoldings,
+} from "@/lib/queries";
+import { db, schema } from "@/db";
+import { eq } from "drizzle-orm";
+import { formatEUR, formatDateFR } from "@/lib/format";
+import { accountKindLabel, accountKindColor, isLiability } from "@/lib/labels";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft } from "lucide-react";
+import { AccountPerfChart } from "./perf-chart";
+import {
+  DCASettingsEditor,
+  AddHistoryPointForm,
+  DeleteHistoryButton,
+} from "./edit-controls";
+
+export default async function AccountDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const acc = await getAccount(id);
+  if (!acc) notFound();
+
+  const snaps = await getAccountSnapshots(acc.id);
+  const holdings = await getHoldings(acc.id);
+
+  // Property appreciation rate if applicable
+  let appreciationPct: number | null = null;
+  if (acc.kind === "real_estate") {
+    const [prop] = await db
+      .select()
+      .from(schema.property)
+      .where(eq(schema.property.accountId, acc.id));
+    if (prop) appreciationPct = prop.annualAppreciationPct;
+  }
+
+  // Active mortgage if applicable
+  let activeMortgage: { monthlyPayment: number; remainingBalance: number; interestRatePct: number; termMonths: number } | null = null;
+  if (acc.kind === "loan") {
+    const [m] = await db.select().from(schema.mortgage).where(eq(schema.mortgage.accountId, acc.id));
+    if (m) {
+      activeMortgage = {
+        monthlyPayment: m.monthlyPayment,
+        remainingBalance: m.remainingBalance,
+        interestRatePct: m.interestRatePct,
+        termMonths: m.termMonths,
+      };
+    }
+  }
+
+  const series = snaps.map((s) => ({
+    date: (s.date as unknown as Date).toISOString(),
+    value: s.value,
+  }));
+
+  // Compute performance metrics
+  const current = acc.currentValue;
+  const first = series[0]?.value ?? current;
+  const firstDate = series[0]?.date;
+  const priorYear = series
+    .slice()
+    .reverse()
+    .find((s) => {
+      const d = new Date(s.date);
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - 1);
+      return d <= cutoff;
+    });
+  const yoyDelta = priorYear ? current - priorYear.value : null;
+  const yoyPct = priorYear && priorYear.value !== 0 ? (yoyDelta! / Math.abs(priorYear.value)) * 100 : null;
+
+  // YTD
+  const yearStart = new Date(new Date().getFullYear(), 0, 1);
+  const ytdPoint = series.find((s) => new Date(s.date) >= yearStart) ?? series[0];
+  const ytdDelta = ytdPoint ? current - ytdPoint.value : null;
+  const ytdPct = ytdPoint && ytdPoint.value !== 0 ? (ytdDelta! / Math.abs(ytdPoint.value)) * 100 : null;
+
+  // CAGR
+  let cagr: number | null = null;
+  if (firstDate && first !== 0) {
+    const years = Math.max(
+      0.01,
+      (Date.now() - new Date(firstDate).getTime()) / (365.25 * 24 * 3600 * 1000)
+    );
+    if (years > 0.1 && first > 0 && current > 0) {
+      cagr = (Math.pow(current / first, 1 / years) - 1) * 100;
+    }
+  }
+
+  const totalVariation = current - first;
+
+  return (
+    <>
+      <PageHeader
+        title={acc.name}
+        subtitle={
+          <span className="flex items-center gap-2">
+            <span
+              className="size-2.5 rounded-full"
+              style={{ backgroundColor: accountKindColor[acc.kind] }}
+            />
+            {accountKindLabel[acc.kind]}
+            {acc.institution && <span>· {acc.institution}</span>}
+          </span>
+        }
+        action={
+          <Link href="/accounts">
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="size-4" /> Retour
+            </Button>
+          </Link>
+        }
+      />
+      <div className="space-y-6 p-8">
+        <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <Kpi
+            label="Valeur actuelle"
+            value={formatEUR(current)}
+            negative={isLiability(acc.kind) || current < 0}
+          />
+          <Kpi
+            label="Variation YTD"
+            value={ytdDelta != null ? formatEUR(ytdDelta, { signed: true }) : "—"}
+            hint={ytdPct != null ? `${ytdPct >= 0 ? "+" : ""}${ytdPct.toFixed(1)} %` : undefined}
+            positive={ytdDelta != null && ytdDelta > 0}
+            negative={ytdDelta != null && ytdDelta < 0}
+          />
+          <Kpi
+            label="Variation 1 an"
+            value={yoyDelta != null ? formatEUR(yoyDelta, { signed: true }) : "—"}
+            hint={yoyPct != null ? `${yoyPct >= 0 ? "+" : ""}${yoyPct.toFixed(1)} %` : undefined}
+            positive={yoyDelta != null && yoyDelta > 0}
+            negative={yoyDelta != null && yoyDelta < 0}
+          />
+          <Kpi
+            label="CAGR"
+            value={cagr != null ? `${cagr >= 0 ? "+" : ""}${cagr.toFixed(2)} %` : "—"}
+            hint={firstDate ? `depuis ${formatDateFR(firstDate)}` : undefined}
+            positive={cagr != null && cagr > 0}
+            negative={cagr != null && cagr < 0}
+          />
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-base font-semibold">Évolution du compte</h2>
+            <div className="text-xs text-muted-foreground">
+              {series.length} point{series.length > 1 ? "s" : ""} · total{" "}
+              {formatEUR(totalVariation, { signed: true })}
+            </div>
+          </div>
+          {series.length < 2 ? (
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+              Pas encore assez de points pour tracer une courbe. Chaque mise à jour mensuelle
+              enregistre un nouveau point.
+            </div>
+          ) : (
+            <AccountPerfChart data={series} />
+          )}
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2">
+          <Panel title="Paramètres DCA">
+            <DCASettingsEditor
+              accountId={acc.id}
+              annualYieldPct={acc.annualYieldPct}
+              monthlyContribution={acc.monthlyContribution}
+              canYield={
+                acc.kind === "savings" ||
+                acc.kind === "cash" ||
+                acc.kind === "brokerage" ||
+                acc.kind === "retirement" ||
+                acc.kind === "crypto"
+              }
+              canContribute={
+                acc.kind === "savings" ||
+                acc.kind === "cash" ||
+                acc.kind === "brokerage" ||
+                acc.kind === "retirement"
+              }
+            />
+            {(appreciationPct != null || activeMortgage) && (
+              <div className="mt-2 border-t border-border/60 pt-2">
+                <dl className="divide-y divide-border/60 text-sm">
+                  {appreciationPct != null && (
+                    <Row label="Appréciation annuelle" value={`${appreciationPct} %`} />
+                  )}
+                  {activeMortgage && (
+                    <>
+                      <Row label="Mensualité" value={formatEUR(activeMortgage.monthlyPayment)} />
+                      <Row label="Taux" value={`${activeMortgage.interestRatePct} %`} />
+                      <Row
+                        label="Solde restant"
+                        value={formatEUR(activeMortgage.remainingBalance)}
+                      />
+                    </>
+                  )}
+                </dl>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Historique des mises à jour">
+            <div className="mb-2">
+              <AddHistoryPointForm accountId={acc.id} />
+            </div>
+            {snaps.length === 0 ? (
+              <p className="py-3 text-center text-xs text-muted-foreground">
+                Aucun point d&apos;historique encore. Ajoute-en manuellement ci-dessus ou utilise
+                la mise à jour mensuelle.
+              </p>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-card">
+                    <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="px-2 py-2 text-left font-medium">Date</th>
+                      <th className="px-2 py-2 text-right font-medium">Valeur</th>
+                      <th className="px-2 py-2 text-right font-medium">Δ</th>
+                      <th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snaps.slice().reverse().map((s, i, arr) => {
+                      const prev = arr[i + 1];
+                      const delta = prev ? s.value - prev.value : 0;
+                      const sign = delta > 0 ? "text-[var(--color-success)]" : delta < 0 ? "text-destructive" : "text-muted-foreground";
+                      return (
+                        <tr key={s.id} className="border-b border-border/40 last:border-none">
+                          <td className="px-2 py-1.5">
+                            {formatDateFR(s.date as unknown as Date)}
+                          </td>
+                          <td className="numeric px-2 py-1.5 text-right">
+                            {formatEUR(s.value)}
+                          </td>
+                          <td className={`numeric px-2 py-1.5 text-right ${sign}`}>
+                            {prev ? formatEUR(delta, { signed: true }) : "—"}
+                          </td>
+                          <td className="px-1 py-1.5 text-right">
+                            <DeleteHistoryButton
+                              id={s.id}
+                              accountId={acc.id}
+                              date={(s.date as unknown as Date).toISOString()}
+                              value={s.value}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+        </section>
+
+        {holdings.length > 0 && (
+          <section className="rounded-xl border border-border bg-card">
+            <div className="border-b border-border px-5 py-3">
+              <h2 className="text-base font-semibold">ETF du wallet</h2>
+              <p className="text-xs text-muted-foreground">
+                Allocation et valeurs estimées sur {formatEUR(current)}.
+              </p>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-5 py-2 text-left font-medium">Ticker / ISIN</th>
+                  <th className="px-3 py-2 text-left font-medium">Nom</th>
+                  <th className="px-3 py-2 text-right font-medium">Allocation</th>
+                  <th className="px-5 py-2 text-right font-medium">Valeur estimée</th>
+                </tr>
+              </thead>
+              <tbody>
+                {holdings.map((h) => {
+                  const pct = h.allocationPct ?? 0;
+                  const v = (current * pct) / 100;
+                  return (
+                    <tr key={h.id} className="border-b border-border/60 last:border-none">
+                      <td className="px-5 py-2">
+                        <div className="font-mono font-medium">{h.ticker}</div>
+                        {h.isin && (
+                          <div className="text-[10px] font-mono text-muted-foreground">
+                            {h.isin}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        {h.name ?? "—"}
+                      </td>
+                      <td className="numeric px-3 py-2 text-right">{pct.toFixed(1)} %</td>
+                      <td className="numeric px-5 py-2 text-right font-medium">
+                        {formatEUR(v)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </section>
+        )}
+      </div>
+    </>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  hint,
+  positive,
+  negative,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  positive?: boolean;
+  negative?: boolean;
+}) {
+  const tone = positive ? "text-[var(--color-success)]" : negative ? "text-destructive" : "";
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`numeric mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>
+      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="border-b border-border px-4 py-2.5">
+        <h3 className="text-sm font-semibold">{title}</h3>
+      </div>
+      <div className="px-4 py-2">{children}</div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="numeric text-sm font-medium">{value}</dd>
+    </div>
+  );
+}
