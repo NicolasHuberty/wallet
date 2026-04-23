@@ -1,4 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+// Polyfill Promise.try for Node < 23 (V8 < 12.9). unpdf / pdfjs use it
+// internally and crash with "Promise.try is not a function" otherwise.
+if (typeof (Promise as unknown as { try?: unknown }).try !== "function") {
+  (Promise as unknown as { try: (fn: (...a: unknown[]) => unknown, ...a: unknown[]) => Promise<unknown> }).try =
+    function <T, A extends unknown[]>(fn: (...a: A) => T | Promise<T>, ...args: A) {
+      return new Promise<T>((resolve, reject) => {
+        try {
+          Promise.resolve(fn(...args)).then(resolve, reject);
+        } catch (e) {
+          reject(e as Error);
+        }
+      });
+    } as unknown as (fn: (...a: unknown[]) => unknown, ...a: unknown[]) => Promise<unknown>;
+}
 import { extractText, getDocumentProxy } from "unpdf";
 import { parseAmortizationPDFText } from "@/lib/pdf-amortization";
 

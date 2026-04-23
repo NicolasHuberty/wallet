@@ -360,7 +360,7 @@ export function PropertyWizard({ householdId, trigger }: { householdId: string; 
                         <>
                           <Loader2 className="size-6 animate-spin text-[var(--chart-1)]" />
                           <div className="text-sm font-medium">Analyse du PDF…</div>
-                          <div className="text-xs text-muted-foreground">Extraction des échéances via pdftotext</div>
+                          <div className="text-xs text-muted-foreground">Extraction des échéances en cours</div>
                         </>
                       ) : (
                         <>
