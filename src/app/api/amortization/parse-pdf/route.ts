@@ -1,29 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "node:child_process";
+import { PDFParse } from "pdf-parse";
 import { parseAmortizationPDFText } from "@/lib/pdf-amortization";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function extractTextWithPdftotext(buf: Buffer): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { stdio: ["pipe", "pipe", "pipe"] });
-    const chunks: Buffer[] = [];
-    const errs: Buffer[] = [];
-    child.stdout.on("data", (c) => chunks.push(c));
-    child.stderr.on("data", (c) => errs.push(c));
-    child.on("error", (e) => reject(new Error(`pdftotext introuvable: ${e.message}. Installe poppler (brew install poppler ou apt install poppler-utils).`)));
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`pdftotext exit ${code}: ${Buffer.concat(errs).toString()}`));
-        return;
-      }
-      resolve(Buffer.concat(chunks).toString("utf-8"));
-    });
-    child.stdin.write(buf);
-    child.stdin.end();
-  });
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,10 +24,12 @@ export async function POST(req: NextRequest) {
     }
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const text = await extractTextWithPdftotext(buf);
-    const result = parseAmortizationPDFText(text, startDate);
+    const parser = new PDFParse({ data: buf });
+    const result0 = await parser.getText();
+    const text = result0.text ?? "";
+    const pageCount = result0.pages?.length ?? 1;
 
-    const pageCount = (text.match(/\f/g)?.length ?? 0) + 1;
+    const result = parseAmortizationPDFText(text, startDate);
 
     return NextResponse.json({
       rows: result.rows.map((r) => ({
@@ -64,6 +46,9 @@ export async function POST(req: NextRequest) {
       textLength: text.length,
     });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    return NextResponse.json(
+      { error: (e as Error).message ?? "Erreur de parsing PDF" },
+      { status: 500 }
+    );
   }
 }
