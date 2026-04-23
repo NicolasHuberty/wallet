@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { chargeCategory } from "@/db/schema";
+import { assertWritable } from "@/lib/demo";
 
 const chargeSchema = z.object({
   id: z.string().optional(),
@@ -20,6 +21,7 @@ const chargeSchema = z.object({
 });
 
 export async function saveCharge(values: z.infer<typeof chargeSchema>) {
+  assertWritable();
   const p = chargeSchema.parse(values);
   const data = {
     householdId: p.householdId,
@@ -44,6 +46,7 @@ export async function saveCharge(values: z.infer<typeof chargeSchema>) {
 }
 
 export async function deleteCharge(id: string) {
+  assertWritable();
   await db.delete(schema.oneOffCharge).where(eq(schema.oneOffCharge.id, id));
   revalidatePath("/charges");
   revalidatePath("/real-estate");

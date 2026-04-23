@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { accountKind } from "@/db/schema";
 import { recomputeSnapshot } from "@/lib/snapshots";
+import { assertWritable } from "@/lib/demo";
 
 const upsertSchema = z.object({
   id: z.string().optional(),
@@ -24,6 +25,7 @@ const upsertSchema = z.object({
 });
 
 export async function saveAccount(values: z.infer<typeof upsertSchema>) {
+  assertWritable();
   const parsed = upsertSchema.parse(values);
   const clean = {
     householdId: parsed.householdId,
@@ -52,6 +54,7 @@ export async function saveAccount(values: z.infer<typeof upsertSchema>) {
 }
 
 export async function deleteAccount(id: string) {
+  assertWritable();
   const [acc] = await db.select().from(schema.account).where(eq(schema.account.id, id));
   await db.delete(schema.account).where(eq(schema.account.id, id));
   if (acc) await recomputeSnapshot(acc.householdId);
@@ -71,6 +74,7 @@ const patchSchema = z.object({
 });
 
 export async function patchAccount(values: z.infer<typeof patchSchema>) {
+  assertWritable();
   const p = patchSchema.parse(values);
   const [acc] = await db.select().from(schema.account).where(eq(schema.account.id, p.id));
   if (!acc) throw new Error("Compte introuvable");
@@ -97,6 +101,7 @@ const historyPointSchema = z.object({
 });
 
 export async function addAccountHistoryPoint(values: z.infer<typeof historyPointSchema>) {
+  assertWritable();
   const p = historyPointSchema.parse(values);
   const d = new Date(p.date);
   d.setHours(12, 0, 0, 0);
@@ -131,6 +136,7 @@ export async function addAccountHistoryPoint(values: z.infer<typeof historyPoint
 }
 
 export async function deleteAccountHistoryPoint(id: string, accountId: string) {
+  assertWritable();
   await db.delete(schema.accountSnapshot).where(eq(schema.accountSnapshot.id, id));
   revalidatePath(`/accounts/${accountId}`);
   revalidatePath("/accounts");

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { expenseCategory, incomeCategory } from "@/db/schema";
+import { assertWritable } from "@/lib/demo";
 
 const expenseSchema = z.object({
   id: z.string().optional(),
@@ -19,6 +20,7 @@ const expenseSchema = z.object({
 });
 
 export async function saveRecurringExpense(values: z.infer<typeof expenseSchema>) {
+  assertWritable();
   const p = expenseSchema.parse(values);
   const data = {
     householdId: p.householdId,
@@ -41,6 +43,7 @@ export async function saveRecurringExpense(values: z.infer<typeof expenseSchema>
 }
 
 export async function deleteRecurringExpense(id: string) {
+  assertWritable();
   await db.delete(schema.recurringExpense).where(eq(schema.recurringExpense.id, id));
   revalidatePath("/expenses");
   revalidatePath("/");
@@ -59,6 +62,7 @@ const incomeSchema = z.object({
 });
 
 export async function saveRecurringIncome(values: z.infer<typeof incomeSchema>) {
+  assertWritable();
   const p = incomeSchema.parse(values);
   const data = {
     householdId: p.householdId,
@@ -81,6 +85,7 @@ export async function saveRecurringIncome(values: z.infer<typeof incomeSchema>) 
 }
 
 export async function deleteRecurringIncome(id: string) {
+  assertWritable();
   await db.delete(schema.recurringIncome).where(eq(schema.recurringIncome.id, id));
   revalidatePath("/expenses");
   revalidatePath("/");

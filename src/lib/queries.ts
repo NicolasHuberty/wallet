@@ -3,8 +3,21 @@ import { eq, asc } from "drizzle-orm";
 import { headers } from "next/headers";
 import { isLiability } from "./labels";
 import { auth } from "./auth";
+import { DEMO_MODE, DEMO_EMAIL, DEMO_NAME } from "./demo";
 
 export async function getPrimaryHousehold() {
+  // Demo mode: return the seeded demo household, no auth.
+  if (DEMO_MODE) {
+    const rows = await db
+      .select()
+      .from(schema.household)
+      .orderBy(asc(schema.household.createdAt))
+      .limit(1);
+    if (rows.length === 0)
+      throw new Error("Demo seed manquant — run npm run db:seed-demo");
+    return rows[0];
+  }
+
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) {
     throw new Error("Non authentifié — redirection vers /login");
@@ -31,6 +44,17 @@ export async function getPrimaryHousehold() {
 }
 
 export async function getCurrentUser() {
+  if (DEMO_MODE) {
+    return {
+      id: "demo",
+      name: DEMO_NAME,
+      email: DEMO_EMAIL,
+      emailVerified: true,
+      image: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
   const session = await auth.api.getSession({ headers: await headers() });
   return session?.user ?? null;
 }

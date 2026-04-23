@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { recomputeSnapshot } from "@/lib/snapshots";
+import { assertWritable } from "@/lib/demo";
 
 const propertySchema = z.object({
   id: z.string().optional(),
@@ -21,6 +22,7 @@ const propertySchema = z.object({
 });
 
 export async function saveProperty(values: z.infer<typeof propertySchema>) {
+  assertWritable();
   const p = propertySchema.parse(values);
   if (p.id) {
     const [existing] = await db.select().from(schema.property).where(eq(schema.property.id, p.id));
@@ -63,6 +65,7 @@ export async function saveProperty(values: z.infer<typeof propertySchema>) {
 }
 
 export async function deleteProperty(accountId: string) {
+  assertWritable();
   const [acc] = await db.select().from(schema.account).where(eq(schema.account.id, accountId));
   await db.delete(schema.account).where(eq(schema.account.id, accountId));
   if (acc) await recomputeSnapshot(acc.householdId);
@@ -86,6 +89,7 @@ const mortgageSchema = z.object({
 });
 
 export async function saveMortgage(values: z.infer<typeof mortgageSchema>) {
+  assertWritable();
   const m = mortgageSchema.parse(values);
   if (m.id) {
     const [existing] = await db.select().from(schema.mortgage).where(eq(schema.mortgage.id, m.id));
@@ -170,6 +174,7 @@ const fullPropertySchema = z.object({
 });
 
 export async function createFullProperty(values: z.infer<typeof fullPropertySchema>) {
+  assertWritable();
   const p = fullPropertySchema.parse(values);
   const signingDate = new Date(p.property.signingDate);
 
@@ -251,6 +256,7 @@ export async function createFullProperty(values: z.infer<typeof fullPropertySche
 }
 
 export async function importAmortizationCSV(mortgageId: string, rows: Array<{ dueDate: string; payment: number; principal: number; interest: number; balance: number }>) {
+  assertWritable();
   if (rows.length === 0) throw new Error("Aucune ligne à importer");
   await db.delete(schema.amortizationEntry).where(eq(schema.amortizationEntry.mortgageId, mortgageId));
   const values = rows.map((r) => ({
@@ -280,6 +286,7 @@ export async function importAmortizationCSV(mortgageId: string, rows: Array<{ du
 }
 
 export async function generateAmortization(mortgageId: string) {
+  assertWritable();
   const [m] = await db.select().from(schema.mortgage).where(eq(schema.mortgage.id, mortgageId));
   if (!m) throw new Error("Prêt introuvable");
   await db.delete(schema.amortizationEntry).where(eq(schema.amortizationEntry.mortgageId, mortgageId));

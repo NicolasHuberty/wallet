@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { recomputeSnapshot } from "@/lib/snapshots";
+import { assertWritable } from "@/lib/demo";
 
 function touchCheckIn() {
   revalidatePath("/");
@@ -21,6 +22,7 @@ const noteSchema = z.object({
 });
 
 export async function updateExpenseNote(values: z.infer<typeof noteSchema>) {
+  assertWritable();
   const p = noteSchema.parse(values);
   await db
     .update(schema.recurringExpense)
@@ -30,6 +32,7 @@ export async function updateExpenseNote(values: z.infer<typeof noteSchema>) {
 }
 
 export async function updateIncomeNote(values: z.infer<typeof noteSchema>) {
+  assertWritable();
   const p = noteSchema.parse(values);
   await db
     .update(schema.recurringIncome)
@@ -39,6 +42,7 @@ export async function updateIncomeNote(values: z.infer<typeof noteSchema>) {
 }
 
 export async function updateChargeNote(values: z.infer<typeof noteSchema>) {
+  assertWritable();
   const p = noteSchema.parse(values);
   await db
     .update(schema.oneOffCharge)
@@ -53,6 +57,7 @@ const dcaSchema = z.object({
 });
 
 export async function updateAccountDCA(values: z.infer<typeof dcaSchema>) {
+  assertWritable();
   const p = dcaSchema.parse(values);
   await db
     .update(schema.account)
@@ -74,6 +79,7 @@ const quickExpenseSchema = z.object({
 });
 
 export async function quickAddExpense(values: z.infer<typeof quickExpenseSchema>) {
+  assertWritable();
   const p = quickExpenseSchema.parse(values);
   await db.insert(schema.recurringExpense).values({
     householdId: p.householdId,
@@ -101,6 +107,7 @@ const quickChargeSchema = z.object({
 });
 
 export async function quickAddCharge(values: z.infer<typeof quickChargeSchema>) {
+  assertWritable();
   const p = quickChargeSchema.parse(values);
   await db.insert(schema.oneOffCharge).values({
     householdId: p.householdId,
@@ -168,6 +175,7 @@ export async function quickAddCharge(values: z.infer<typeof quickChargeSchema>) 
 }
 
 export async function deleteChargeTemplate(id: string) {
+  assertWritable();
   await db.delete(schema.chargeTemplate).where(eq(schema.chargeTemplate.id, id));
   touchCheckIn();
 }
@@ -185,6 +193,7 @@ const quickIncomeSchema = z.object({
 });
 
 export async function quickAddIncome(values: z.infer<typeof quickIncomeSchema>) {
+  assertWritable();
   const p = quickIncomeSchema.parse(values);
   await db.insert(schema.oneOffIncome).values({
     householdId: p.householdId,
@@ -247,6 +256,7 @@ export async function quickAddIncome(values: z.infer<typeof quickIncomeSchema>) 
 }
 
 export async function updateOneOffIncomeNote(values: z.infer<typeof noteSchema>) {
+  assertWritable();
   const p = noteSchema.parse(values);
   await db
     .update(schema.oneOffIncome)
@@ -256,22 +266,26 @@ export async function updateOneOffIncomeNote(values: z.infer<typeof noteSchema>)
 }
 
 export async function removeOneOffIncome(id: string) {
+  assertWritable();
   await db.delete(schema.oneOffIncome).where(eq(schema.oneOffIncome.id, id));
   touchCheckIn();
 }
 
 export async function deleteIncomeTemplate(id: string) {
+  assertWritable();
   await db.delete(schema.incomeTemplate).where(eq(schema.incomeTemplate.id, id));
   touchCheckIn();
 }
 
 // ---------- Suppression ----------
 export async function removeExpense(id: string) {
+  assertWritable();
   await db.delete(schema.recurringExpense).where(eq(schema.recurringExpense.id, id));
   touchCheckIn();
 }
 
 export async function removeCharge(id: string) {
+  assertWritable();
   await db.delete(schema.oneOffCharge).where(eq(schema.oneOffCharge.id, id));
   touchCheckIn();
 }
@@ -305,6 +319,7 @@ const checkInSchema = z.object({
 });
 
 export async function saveMonthlyCheckIn(values: z.infer<typeof checkInSchema>) {
+  assertWritable();
   const p = checkInSchema.parse(values);
   // Snapshot date = last day of the selected month at 23:59:59
   const [y, m] = p.month.split("-").map(Number);

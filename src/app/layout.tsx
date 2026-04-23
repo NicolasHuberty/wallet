@@ -6,6 +6,8 @@ import { SidebarNav, SidebarBrand } from "@/components/sidebar-nav";
 import { HouseholdSummary } from "@/components/household-summary";
 import { Toaster } from "@/components/ui/sonner";
 import { auth } from "@/lib/auth";
+import { DEMO_MODE } from "@/lib/demo";
+import { DemoBanner } from "@/components/demo-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +34,10 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  const authed = !!session?.user;
+  const session = DEMO_MODE
+    ? null
+    : await auth.api.getSession({ headers: await headers() });
+  const authed = DEMO_MODE || !!session?.user;
 
   return (
     <html
@@ -51,7 +55,10 @@ export default async function RootLayout({
                 <HouseholdSummary />
               </div>
             </aside>
-            <main className="flex-1 overflow-x-hidden">{children}</main>
+            <main className="flex-1 overflow-x-hidden">
+              {DEMO_MODE && <DemoBanner />}
+              {children}
+            </main>
           </div>
         ) : (
           children

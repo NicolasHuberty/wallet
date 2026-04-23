@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { assertWritable } from "@/lib/demo";
 
 const householdSchema = z.object({
   id: z.string(),
@@ -12,6 +13,7 @@ const householdSchema = z.object({
 });
 
 export async function saveHousehold(values: z.infer<typeof householdSchema>) {
+  assertWritable();
   const p = householdSchema.parse(values);
   await db.update(schema.household).set({ name: p.name, baseCurrency: p.baseCurrency.toUpperCase(), updatedAt: new Date() }).where(eq(schema.household.id, p.id));
   revalidatePath("/", "layout");
@@ -26,6 +28,7 @@ const memberSchema = z.object({
 });
 
 export async function saveMember(values: z.infer<typeof memberSchema>) {
+  assertWritable();
   const p = memberSchema.parse(values);
   const data = { householdId: p.householdId, name: p.name, email: p.email || null, color: p.color, updatedAt: new Date() };
   if (p.id) await db.update(schema.member).set(data).where(eq(schema.member.id, p.id));
@@ -34,6 +37,7 @@ export async function saveMember(values: z.infer<typeof memberSchema>) {
 }
 
 export async function deleteMember(id: string) {
+  assertWritable();
   await db.delete(schema.member).where(eq(schema.member.id, id));
   revalidatePath("/", "layout");
 }

@@ -2,9 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/api/auth"];
 const PUBLIC_EXACT = new Set(["/"]);
+const DEMO_MODE = process.env.DEMO_MODE === "true";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Demo mode: every route is public, no redirect.
+  if (DEMO_MODE) return NextResponse.next();
 
   // Allow public paths
   if (PUBLIC_EXACT.has(pathname)) {

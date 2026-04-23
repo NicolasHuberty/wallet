@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { recomputeSnapshot } from "@/lib/snapshots";
 import { parseRevolutCsv } from "@/lib/revolut";
+import { assertWritable } from "@/lib/demo";
 
 function touch(paths = ["/investments", "/accounts", "/"]) {
   for (const p of paths) revalidatePath(p);
@@ -20,6 +21,7 @@ const walletSchema = z.object({
 });
 
 export async function saveWalletBasics(values: z.infer<typeof walletSchema>) {
+  assertWritable();
   const p = walletSchema.parse(values);
   const [acc] = await db.select().from(schema.account).where(eq(schema.account.id, p.accountId));
   if (!acc) throw new Error("Compte introuvable");
@@ -49,6 +51,7 @@ const holdingSchema = z.object({
 });
 
 export async function saveHolding(values: z.infer<typeof holdingSchema>) {
+  assertWritable();
   const p = holdingSchema.parse(values);
   const data = {
     accountId: p.accountId,
@@ -67,6 +70,7 @@ export async function saveHolding(values: z.infer<typeof holdingSchema>) {
 }
 
 export async function deleteHolding(id: string) {
+  assertWritable();
   await db.delete(schema.holding).where(eq(schema.holding.id, id));
   touch();
 }
@@ -82,6 +86,7 @@ const bulkAllocSchema = z.object({
 });
 
 export async function bulkUpdateAllocations(values: z.infer<typeof bulkAllocSchema>) {
+  assertWritable();
   const p = bulkAllocSchema.parse(values);
   for (const r of p.rows) {
     await db
@@ -109,6 +114,7 @@ export type RevolutImportOutcome = {
 export async function importRevolutHoldings(
   values: z.infer<typeof revolutImportSchema>
 ): Promise<RevolutImportOutcome> {
+  assertWritable();
   const p = revolutImportSchema.parse(values);
   const result = parseRevolutCsv(p.csv);
 

@@ -1,6 +1,7 @@
 import { getPrimaryHousehold, getHouseholdMembers, getNetWorth, getCurrentUser } from "@/lib/queries";
 import { formatEUR } from "@/lib/format";
 import { LogoutButton } from "./logout-button";
+import { DEMO_MODE } from "@/lib/demo";
 
 export async function HouseholdSummary() {
   const user = await getCurrentUser();
@@ -35,7 +36,7 @@ export async function HouseholdSummary() {
         <div className="min-w-0 text-[11px] text-sidebar-foreground/60">
           <div className="truncate">{user.email}</div>
         </div>
-        <LogoutButton />
+        {!DEMO_MODE && <LogoutButton />}
       </div>
     </div>
   );

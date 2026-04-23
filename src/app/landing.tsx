@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, Star, Sparkles } from "lucide-react";
+import { ArrowUpRight, Star, Sparkles, Eye } from "lucide-react";
 
 export function Landing() {
   return (
@@ -203,16 +203,24 @@ export function Landing() {
             <div className="fade-in d5 md:col-span-6 md:pl-8 md:border-l md:border-[var(--hairline)]">
               <div className="flex flex-wrap items-center gap-3">
                 <a
-                  href="https://github.com/NicolasHuberty/wallet"
+                  href="https://demo.wallet.huberty.pro"
                   target="_blank"
                   rel="noreferrer"
                   className="btn-primary text-[14px]"
                 >
-                  <Star className="size-4" /> Star on GitHub
+                  <Eye className="size-4" /> Try the demo
                 </a>
                 <Link href="/signup" className="btn-ghost text-[14px]">
-                  Créer un compte <ArrowUpRight className="size-4" />
+                  Créer mon compte <ArrowUpRight className="size-4" />
                 </Link>
+                <a
+                  href="https://github.com/NicolasHuberty/wallet"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-4"
+                >
+                  <Star className="size-3.5" /> Star on GitHub
+                </a>
               </div>
               <div className="mono mt-6 inline-flex items-center gap-2 rounded-[2px] border border-[var(--hairline)] bg-[var(--cream-deep)] px-3 py-2 text-[11px] text-[var(--ink-soft)]">
                 <span className="text-[var(--moss-deep)]">$</span> git clone
