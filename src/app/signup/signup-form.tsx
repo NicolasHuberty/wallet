@@ -24,10 +24,14 @@ export function SignupForm({
 
   function handleGoogle() {
     start(async () => {
-      await signIn.social({
-        provider: "google",
-        callbackURL: from || "/",
-      });
+      try {
+        await signIn.social({
+          provider: "google",
+          callbackURL: from || "/dashboard",
+        });
+      } catch (e) {
+        toast.error((e as Error).message ?? "Google indisponible");
+      }
     });
   }
 
@@ -41,17 +45,17 @@ export function SignupForm({
       return;
     }
     start(async () => {
-      const res = await signUp.email({
-        email,
-        password,
-        name,
-        callbackURL: from || "/",
-      });
-      if (res.error) {
-        toast.error(res.error.message ?? "Inscription impossible");
-      } else {
+      try {
+        const res = await signUp.email({ email, password, name });
+        if (res?.error) {
+          toast.error(res.error.message ?? "Inscription impossible");
+          return;
+        }
         toast.success("Compte créé");
-        router.push(from || "/");
+        router.push(from || "/dashboard");
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Inscription impossible");
       }
     });
   }

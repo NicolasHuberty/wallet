@@ -23,10 +23,14 @@ export function LoginForm({
 
   function handleGoogle() {
     start(async () => {
-      await signIn.social({
-        provider: "google",
-        callbackURL: from || "/",
-      });
+      try {
+        await signIn.social({
+          provider: "google",
+          callbackURL: from || "/dashboard",
+        });
+      } catch (e) {
+        toast.error((e as Error).message ?? "Connexion Google impossible");
+      }
     });
   }
 
@@ -36,15 +40,17 @@ export function LoginForm({
       return;
     }
     start(async () => {
-      const res = await signIn.email({
-        email,
-        password,
-        callbackURL: from || "/",
-      });
-      if (res.error) {
-        toast.error(res.error.message ?? "Identifiants invalides");
-      } else {
-        router.push(from || "/");
+      try {
+        const res = await signIn.email({ email, password });
+        if (res?.error) {
+          toast.error(res.error.message ?? "Identifiants invalides");
+          return;
+        }
+        toast.success("Connecté");
+        router.push(from || "/dashboard");
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Connexion impossible");
       }
     });
   }
