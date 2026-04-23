@@ -232,7 +232,8 @@ export const recurringExpense = pgTable("recurring_expense", {
     .notNull()
     .references(() => household.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
-  category: text("category", { enum: expenseCategory }).notNull(),
+  // Free-text category: presets (expenseCategory) or user-defined string.
+  category: text("category").notNull(),
   amount: real("amount").notNull(),
   ownership: text("ownership", { enum: ownership }).notNull().default("shared"),
   ownerMemberId: text("owner_member_id").references(() => member.id, {
@@ -264,7 +265,7 @@ export const recurringIncome = pgTable("recurring_income", {
     .notNull()
     .references(() => household.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
-  category: text("category", { enum: incomeCategory }).notNull(),
+  category: text("category").notNull(),
   amount: real("amount").notNull(),
   ownership: text("ownership", { enum: ownership }).notNull().default("member"),
   ownerMemberId: text("owner_member_id").references(() => member.id, {
@@ -297,7 +298,7 @@ export const oneOffIncome = pgTable("one_off_income", {
     .references(() => household.id, { onDelete: "cascade" }),
   date: timestamp("date", { withTimezone: true }).notNull(),
   label: text("label").notNull(),
-  category: text("category", { enum: oneOffIncomeCategory }).notNull(),
+  category: text("category").notNull(),
   amount: real("amount").notNull(),
   notes: text("notes"),
   ...timestamps,
@@ -309,7 +310,7 @@ export const incomeTemplate = pgTable("income_template", {
     .notNull()
     .references(() => household.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
-  category: text("category", { enum: oneOffIncomeCategory }).notNull(),
+  category: text("category").notNull(),
   defaultAmount: real("default_amount"),
   notes: text("notes"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
@@ -339,7 +340,8 @@ export const oneOffCharge = pgTable("one_off_charge", {
     .references(() => household.id, { onDelete: "cascade" }),
   date: timestamp("date", { withTimezone: true }).notNull(),
   label: text("label").notNull(),
-  category: text("category", { enum: chargeCategory }).notNull(),
+  // Free-text category: presets (chargeCategory) or user-defined string.
+  category: text("category").notNull(),
   amount: real("amount").notNull(),
   accountId: text("account_id").references(() => account.id, { onDelete: "set null" }),
   propertyId: text("property_id").references(() => property.id, { onDelete: "set null" }),
@@ -355,7 +357,7 @@ export const chargeTemplate = pgTable("charge_template", {
     .notNull()
     .references(() => household.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
-  category: text("category", { enum: chargeCategory }).notNull(),
+  category: text("category").notNull(),
   defaultAmount: real("default_amount"),
   notes: text("notes"),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),

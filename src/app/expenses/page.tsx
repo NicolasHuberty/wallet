@@ -9,7 +9,8 @@ import {
 import Link from "next/link";
 import { Landmark } from "lucide-react";
 import { formatEUR } from "@/lib/format";
-import { expenseCategoryLabel, incomeCategoryLabel } from "@/lib/labels";
+import { expenseCategoryLabel, incomeCategoryLabel, resolveCategoryLabel } from "@/lib/labels";
+import { ArrowUpRight } from "lucide-react";
 import { FlowDialog, EditFlowButton } from "./flow-dialog";
 import { Badge } from "@/components/ui/badge";
 
@@ -97,10 +98,18 @@ export default async function ExpensesPage() {
               {expenses.length === 0 && <li className="p-6 text-center text-sm text-muted-foreground">Aucune dépense.</li>}
               {expenses.map((e) => (
                 <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
-                  <div>
-                    <div className="font-medium">{e.label}</div>
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/expenses/${e.id}`}
+                      className="inline-flex items-center gap-1 font-medium hover:text-[var(--chart-1)] hover:underline"
+                    >
+                      {e.label}
+                      <ArrowUpRight className="size-3 opacity-60" />
+                    </Link>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="secondary">{expenseCategoryLabel[e.category]}</Badge>
+                      <Badge variant="secondary">
+                        {resolveCategoryLabel(e.category, expenseCategoryLabel)}
+                      </Badge>
                       <span>{e.ownership === "shared" ? "Partagé" : (e.ownerMemberId ? memberById[e.ownerMemberId]?.name : "Individuel")}</span>
                     </div>
                   </div>
@@ -132,7 +141,7 @@ export default async function ExpensesPage() {
                   <div>
                     <div className="font-medium">{i.label}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant="secondary">{incomeCategoryLabel[i.category]}</Badge>
+                      <Badge variant="secondary">{resolveCategoryLabel(i.category, incomeCategoryLabel)}</Badge>
                       <span>{i.ownership === "shared" ? "Partagé" : (i.ownerMemberId ? memberById[i.ownerMemberId]?.name : "Individuel")}</span>
                     </div>
                   </div>
@@ -159,7 +168,7 @@ export default async function ExpensesPage() {
               const pct = totalExpense > 0 ? (amount / totalExpense) * 100 : 0;
               return (
                 <li key={cat} className="flex items-center gap-4 px-5 py-3 text-sm">
-                  <div className="w-32">{expenseCategoryLabel[cat]}</div>
+                  <div className="w-32">{resolveCategoryLabel(cat, expenseCategoryLabel)}</div>
                   <div className="flex-1">
                     <div className="h-2 rounded-full bg-muted">
                       <div className="h-2 rounded-full bg-[var(--chart-1)]" style={{ width: `${pct}%` }} />

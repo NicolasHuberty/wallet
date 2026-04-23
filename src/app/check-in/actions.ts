@@ -73,7 +73,7 @@ export async function updateAccountDCA(values: z.infer<typeof dcaSchema>) {
 const quickExpenseSchema = z.object({
   householdId: z.string().min(1),
   label: z.string().min(1),
-  category: z.enum(schema.expenseCategory),
+  category: z.string().min(1),
   amount: z.coerce.number().positive(),
   notes: z.string().optional().nullable(),
 });
@@ -99,7 +99,7 @@ const quickChargeSchema = z.object({
   householdId: z.string().min(1),
   date: z.string().min(1),
   label: z.string().min(1),
-  category: z.enum(schema.chargeCategory),
+  category: z.string().min(1),
   amount: z.coerce.number().positive(),
   notes: z.string().optional().nullable(),
   saveAsTemplate: z.boolean().default(true),
@@ -185,7 +185,7 @@ const quickIncomeSchema = z.object({
   householdId: z.string().min(1),
   date: z.string().min(1),
   label: z.string().min(1),
-  category: z.enum(schema.oneOffIncomeCategory),
+  category: z.string().min(1),
   amount: z.coerce.number().positive(),
   notes: z.string().optional().nullable(),
   saveAsTemplate: z.boolean().default(true),

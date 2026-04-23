@@ -4,14 +4,13 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { expenseCategory, incomeCategory } from "@/db/schema";
 import { assertWritable } from "@/lib/demo";
 
 const expenseSchema = z.object({
   id: z.string().optional(),
   householdId: z.string(),
   label: z.string().min(1),
-  category: z.enum(expenseCategory),
+  category: z.string().min(1),
   amount: z.coerce.number(),
   ownership: z.enum(["shared", "member"]),
   ownerMemberId: z.string().optional().nullable(),
@@ -53,7 +52,7 @@ const incomeSchema = z.object({
   id: z.string().optional(),
   householdId: z.string(),
   label: z.string().min(1),
-  category: z.enum(incomeCategory),
+  category: z.string().min(1),
   amount: z.coerce.number(),
   ownership: z.enum(["shared", "member"]),
   ownerMemberId: z.string().optional().nullable(),

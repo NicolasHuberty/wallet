@@ -1,9 +1,16 @@
 import { PageHeader } from "@/components/page-header";
 import { getPrimaryHousehold, getCharges, getProperties } from "@/lib/queries";
 import { formatEUR, formatDateFR } from "@/lib/format";
-import { chargeCategoryLabel, chargeCategoryColor } from "@/lib/labels";
+import {
+  chargeCategoryLabel,
+  chargeCategoryColor,
+  resolveCategoryLabel,
+  resolveCategoryColor,
+} from "@/lib/labels";
 import { ChargeDialog, EditChargeButton } from "./charge-dialog";
 import { Badge } from "@/components/ui/badge";
+import { MonthlyBars, CategoryDonut } from "./charts";
+import { RefreshCw, TrendingUp } from "lucide-react";
 
 export default async function ChargesPage() {
   const h = await getPrimaryHousehold();
@@ -12,148 +19,381 @@ export default async function ChargesPage() {
   const propertyOptions = props.map((p) => ({ id: p.property.id, name: p.account.name }));
   const propertyById = Object.fromEntries(propertyOptions.map((p) => [p.id, p]));
 
-  const sorted = [...charges].sort((a, b) => (b.date as unknown as Date).getTime() - (a.date as unknown as Date).getTime());
+  const sorted = [...charges].sort(
+    (a, b) => (b.date as unknown as Date).getTime() - (a.date as unknown as Date).getTime()
+  );
+
   const total = charges.reduce((s, c) => s + c.amount, 0);
-  const costBasisIncluded = charges.filter((c) => c.includeInCostBasis).reduce((s, c) => s + c.amount, 0);
+  const thisYear = new Date().getFullYear();
+  const ytd = charges
+    .filter((c) => (c.date as unknown as Date).getFullYear() === thisYear)
+    .reduce((s, c) => s + c.amount, 0);
 
-  const byCat = charges.reduce<Record<string, number>>((acc, c) => {
-    acc[c.category] = (acc[c.category] ?? 0) + c.amount;
-    return acc;
-  }, {});
+  // Monthly aggregation over the last 24 months
+  const now = new Date();
+  const monthlyMap = new Map<string, number>();
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    monthlyMap.set(key, 0);
+  }
+  for (const c of charges) {
+    const d = c.date as unknown as Date;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (monthlyMap.has(key)) {
+      monthlyMap.set(key, (monthlyMap.get(key) ?? 0) + c.amount);
+    }
+  }
+  const monthlyData = Array.from(monthlyMap.entries()).map(([month, amount]) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1, 1);
+    return {
+      month,
+      label: d.toLocaleDateString("fr-BE", { month: "short", year: "2-digit" }),
+      amount: Math.round(amount),
+    };
+  });
 
-  const yearsMap = charges.reduce<Record<string, number>>((acc, c) => {
-    const y = (c.date as unknown as Date).getFullYear().toString();
-    acc[y] = (acc[y] ?? 0) + c.amount;
-    return acc;
-  }, {});
-  const years = Object.keys(yearsMap).sort();
+  // Rolling average per month (over the last 24 months with data)
+  const monthsWithData = monthlyData.filter((m) => m.amount > 0).length;
+  const monthlyAvg = monthsWithData > 0 ? total / Math.max(1, monthsWithData) : 0;
+
+  // By category
+  const byCat = new Map<string, number>();
+  for (const c of charges) {
+    byCat.set(c.category, (byCat.get(c.category) ?? 0) + c.amount);
+  }
+  const donutData = Array.from(byCat.entries())
+    .map(([cat, amount]) => ({
+      name: resolveCategoryLabel(cat, chargeCategoryLabel),
+      value: amount,
+      color: resolveCategoryColor(cat, chargeCategoryColor),
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  // Top 10 most expensive single charges
+  const topExpensive = [...charges].sort((a, b) => b.amount - a.amount).slice(0, 10);
+
+  // Detect recurring labels (yearly-ish)
+  type Occ = { date: Date; amount: number };
+  const occurrences = new Map<string, Occ[]>();
+  for (const c of charges) {
+    const key = c.label.trim().toLowerCase();
+    const arr = occurrences.get(key) ?? [];
+    arr.push({ date: c.date as unknown as Date, amount: c.amount });
+    occurrences.set(key, arr);
+  }
+
+  type Recurring = {
+    label: string;
+    count: number;
+    total: number;
+    avg: number;
+    last: Date;
+    avgGapMonths: number;
+    isYearly: boolean;
+  };
+
+  const recurring: Recurring[] = [];
+  for (const [key, list] of occurrences) {
+    if (list.length < 2) continue;
+    const sortedList = [...list].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const gaps: number[] = [];
+    for (let i = 1; i < sortedList.length; i++) {
+      const a = sortedList[i - 1].date;
+      const b = sortedList[i].date;
+      const months = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+      gaps.push(months);
+    }
+    const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+    const isYearly = avgGap >= 9 && avgGap <= 15;
+    const sum = list.reduce((s, o) => s + o.amount, 0);
+    // Find the original label (first one with that key)
+    const label = charges.find((c) => c.label.trim().toLowerCase() === key)?.label ?? key;
+    recurring.push({
+      label,
+      count: list.length,
+      total: sum,
+      avg: sum / list.length,
+      last: sortedList[sortedList.length - 1].date,
+      avgGapMonths: avgGap,
+      isYearly,
+    });
+  }
+  recurring.sort((a, b) => b.count - a.count || b.total - a.total);
+  const yearlyRecurring = recurring.filter((r) => r.isYearly);
+  const mostRecurrent = recurring.slice(0, 6);
 
   return (
     <>
       <PageHeader
         title="Frais one-shot"
-        subtitle="Notaire, droits d'enregistrement, frais de crédit, travaux — impact patrimoine & coût de revient des biens"
+        subtitle="Notaire, droits, travaux, taxes exceptionnelles — analyse historique et récurrence"
         action={<ChargeDialog householdId={h.id} properties={propertyOptions} />}
       />
       <div className="space-y-6 p-8">
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Kpi label="Total frais payés" value={formatEUR(total)} sub={`${charges.length} ligne${charges.length > 1 ? "s" : ""}`} />
-          <Kpi label="Inclus dans coût de revient" value={formatEUR(costBasisIncluded)} sub={`${charges.filter((c) => c.includeInCostBasis).length} / ${charges.length}`} />
-          <Kpi label="Catégories distinctes" value={Object.keys(byCat).length.toString()} />
+        {/* KPI band */}
+        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+          <Kpi label={`${thisYear}`} value={formatEUR(ytd)} sub="YTD" />
+          <Kpi label="Total (toutes années)" value={formatEUR(total)} sub={`${charges.length} entrée${charges.length > 1 ? "s" : ""}`} />
+          <Kpi label="Moyenne / mois" value={formatEUR(monthlyAvg)} sub={`sur ${monthsWithData} mois actifs`} />
+          <Kpi
+            label="Plus cher"
+            value={topExpensive[0] ? formatEUR(topExpensive[0].amount) : "—"}
+            sub={topExpensive[0]?.label}
+          />
+          <Kpi
+            label="Récurrents annuels"
+            value={yearlyRecurring.length.toString()}
+            sub={yearlyRecurring.length > 0 ? yearlyRecurring[0].label : "aucun détecté"}
+          />
         </section>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-          <section className="rounded-xl border border-border bg-card lg:col-span-3">
-            <div className="flex items-center justify-between border-b border-border p-5">
+        {/* Charts */}
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          <div className="rounded-xl border border-border bg-card p-5 lg:col-span-3">
+            <div className="mb-4 flex items-baseline justify-between">
               <div>
-                <h2 className="text-base font-semibold">Timeline</h2>
-                <p className="text-xs text-muted-foreground">Ordre chronologique descendant</p>
+                <h2 className="text-base font-semibold">Frais par mois</h2>
+                <p className="text-xs text-muted-foreground">24 derniers mois</p>
               </div>
+              <span className="text-xs text-muted-foreground">
+                Max du mois :{" "}
+                {formatEUR(Math.max(...monthlyData.map((d) => d.amount), 0), { compact: true })}
+              </span>
             </div>
-            <ul className="divide-y divide-border">
-              {sorted.length === 0 && (
-                <li className="p-12 text-center text-sm text-muted-foreground">
-                  Aucun frais. Commence par ajouter les frais de notaire de ta maison.
-                </li>
-              )}
-              {sorted.map((c) => (
-                <li key={c.id} className="flex items-start gap-4 px-5 py-3 text-sm">
-                  <div className="mt-1 size-2 shrink-0 rounded-full" style={{ backgroundColor: chargeCategoryColor[c.category] }} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{c.label}</span>
-                      {!c.includeInCostBasis && <Badge variant="outline" className="text-[10px]">Hors coût de revient</Badge>}
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>{formatDateFR(c.date as unknown as Date)}</span>
-                      <span>·</span>
-                      <Badge variant="secondary" className="text-[10px]">{chargeCategoryLabel[c.category]}</Badge>
-                      {c.propertyId && propertyById[c.propertyId] && (
-                        <>
-                          <span>·</span>
-                          <span>🏠 {propertyById[c.propertyId].name}</span>
-                        </>
-                      )}
-                    </div>
-                    {c.notes && <div className="mt-1 text-xs text-muted-foreground">{c.notes}</div>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="numeric font-medium">{formatEUR(c.amount)}</div>
-                    <EditChargeButton
-                      householdId={h.id}
-                      properties={propertyOptions}
-                      charge={{
-                        id: c.id,
-                        date: (c.date as unknown as Date).toISOString().slice(0, 10),
-                        label: c.label,
-                        category: c.category,
-                        amount: c.amount,
-                        accountId: c.accountId,
-                        propertyId: c.propertyId,
-                        includeInCostBasis: c.includeInCostBasis,
-                        notes: c.notes,
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
+            <MonthlyBars data={monthlyData} />
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5 lg:col-span-2">
+            <h2 className="mb-4 text-base font-semibold">Par catégorie</h2>
+            <CategoryDonut data={donutData} />
+            <ul className="mt-4 max-h-40 space-y-1.5 overflow-y-auto text-xs">
+              {donutData.map((d) => {
+                const pct = total > 0 ? (d.value / total) * 100 : 0;
+                return (
+                  <li key={d.name} className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 truncate">
+                      <span className="size-2 rounded-full" style={{ backgroundColor: d.color }} />
+                      {d.name}
+                    </span>
+                    <span className="numeric shrink-0 text-muted-foreground">
+                      {formatEUR(d.value)} · {pct.toFixed(0)}%
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
-          </section>
+          </div>
+        </section>
 
-          <div className="space-y-6 lg:col-span-2">
-            <section className="rounded-xl border border-border bg-card p-5">
-              <h2 className="mb-4 text-base font-semibold">Par catégorie</h2>
-              {Object.keys(byCat).length === 0 ? (
-                <p className="text-sm text-muted-foreground">—</p>
-              ) : (
-                <ul className="space-y-2.5">
-                  {Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([cat, amount]) => {
-                    const pct = total > 0 ? (amount / total) * 100 : 0;
-                    return (
-                      <li key={cat} className="text-sm">
-                        <div className="mb-1 flex items-center justify-between">
-                          <span className="flex items-center gap-2">
-                            <span className="size-2 rounded-full" style={{ backgroundColor: chargeCategoryColor[cat] }} />
-                            {chargeCategoryLabel[cat]}
-                          </span>
-                          <span className="numeric font-medium">{formatEUR(amount)}</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted">
-                          <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: chargeCategoryColor[cat] }} />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-
-            {years.length > 0 && (
-              <section className="rounded-xl border border-border bg-card p-5">
-                <h2 className="mb-4 text-base font-semibold">Par année</h2>
-                <ul className="space-y-2">
-                  {years.map((y) => (
-                    <li key={y} className="flex items-center justify-between text-sm">
-                      <span>{y}</span>
-                      <span className="numeric font-medium">{formatEUR(yearsMap[y])}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+        {/* Recurring + Top expensive */}
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="size-3.5 text-muted-foreground" />
+                <h2 className="text-base font-semibold">Les plus récurrents</h2>
+              </div>
+              <span className="text-xs text-muted-foreground">par nombre d&apos;occurrences</span>
+            </div>
+            {mostRecurrent.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground">
+                Aucune récurrence détectée (moins de 2 occurrences par libellé).
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {mostRecurrent.map((r) => (
+                  <li key={r.label} className="flex items-center justify-between px-5 py-2.5 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">{r.label}</span>
+                        {r.isYearly && (
+                          <Badge variant="outline" className="text-[9px] uppercase tracking-wider text-[var(--moss-deep,theme(colors.emerald.700))]">
+                            Annuel
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        {r.count} occurrences · ~{r.avgGapMonths.toFixed(1)} mois entre chaque ·
+                        moyenne {formatEUR(r.avg)}
+                      </div>
+                    </div>
+                    <div className="numeric tabular-nums text-sm font-medium">
+                      {formatEUR(r.total)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-        </div>
+
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="size-3.5 text-muted-foreground" />
+                <h2 className="text-base font-semibold">Top 10 — plus chers</h2>
+              </div>
+            </div>
+            {topExpensive.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground">
+                Aucun frais enregistré.
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {topExpensive.map((c, i) => (
+                  <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+                    <span className="mono w-5 shrink-0 text-[10px] text-muted-foreground">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span
+                      className="size-2 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor: resolveCategoryColor(c.category, chargeCategoryColor),
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{c.label}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {formatDateFR(c.date as unknown as Date)} ·{" "}
+                        {resolveCategoryLabel(c.category, chargeCategoryLabel)}
+                      </div>
+                    </div>
+                    <div className="numeric tabular-nums text-sm font-medium text-destructive">
+                      -{formatEUR(c.amount)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* Yearly recurring — hero list if any */}
+        {yearlyRecurring.length > 0 && (
+          <section className="rounded-xl border border-dashed border-[var(--color-success)]/40 bg-[color:oklch(0.96_0.03_150_/_0.4)] p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <RefreshCw className="size-4 text-[var(--color-success)]" />
+              <h2 className="text-base font-semibold">Dépenses annuelles détectées</h2>
+              <span className="text-xs text-muted-foreground">
+                ~12 mois entre chaque — à anticiper
+              </span>
+            </div>
+            <ul className="grid gap-2 md:grid-cols-2">
+              {yearlyRecurring.map((r) => {
+                const nextDate = new Date(r.last);
+                nextDate.setMonth(nextDate.getMonth() + Math.round(r.avgGapMonths));
+                return (
+                  <li
+                    key={r.label}
+                    className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{r.label}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {r.count} fois · prochaine ~{formatDateFR(nextDate)}
+                      </div>
+                    </div>
+                    <div className="numeric tabular-nums text-sm font-medium">
+                      {formatEUR(r.avg)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Full timeline */}
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex items-center justify-between border-b border-border p-5">
+            <div>
+              <h2 className="text-base font-semibold">Tous les frais</h2>
+              <p className="text-xs text-muted-foreground">
+                Ordre chronologique descendant · {charges.length} entrée
+                {charges.length > 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
+          <ul className="divide-y divide-border">
+            {sorted.length === 0 && (
+              <li className="p-12 text-center text-sm text-muted-foreground">
+                Aucun frais. Ajoute ton premier frais one-shot.
+              </li>
+            )}
+            {sorted.map((c) => (
+              <li key={c.id} className="flex items-start gap-4 px-5 py-3 text-sm">
+                <div
+                  className="mt-1 size-2 shrink-0 rounded-full"
+                  style={{
+                    backgroundColor: resolveCategoryColor(c.category, chargeCategoryColor),
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{c.label}</span>
+                    {!c.includeInCostBasis && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Hors coût de revient
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{formatDateFR(c.date as unknown as Date)}</span>
+                    <span>·</span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {resolveCategoryLabel(c.category, chargeCategoryLabel)}
+                    </Badge>
+                    {c.propertyId && propertyById[c.propertyId] && (
+                      <>
+                        <span>·</span>
+                        <span>🏠 {propertyById[c.propertyId].name}</span>
+                      </>
+                    )}
+                  </div>
+                  {c.notes && <div className="mt-1 text-xs text-muted-foreground">{c.notes}</div>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="numeric tabular-nums font-medium">{formatEUR(c.amount)}</div>
+                  <EditChargeButton
+                    householdId={h.id}
+                    properties={propertyOptions}
+                    charge={{
+                      id: c.id,
+                      date: (c.date as unknown as Date).toISOString().slice(0, 10),
+                      label: c.label,
+                      category: c.category,
+                      amount: c.amount,
+                      accountId: c.accountId,
+                      propertyId: c.propertyId,
+                      includeInCostBasis: c.includeInCostBasis,
+                      notes: c.notes,
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </>
   );
 }
 
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Kpi({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="numeric mt-2 text-2xl font-semibold">{value}</div>
-      {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="numeric mt-1.5 text-xl font-semibold tabular-nums">{value}</div>
+      {sub && <div className="mt-1 truncate text-[11px] text-muted-foreground">{sub}</div>}
     </div>
   );
 }

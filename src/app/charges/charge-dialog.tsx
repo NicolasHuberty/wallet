@@ -12,6 +12,8 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { saveCharge, deleteCharge } from "./actions";
 import { chargeCategoryLabel } from "@/lib/labels";
+import { chargeCategory } from "@/db/schema";
+import { CategoryPicker } from "@/components/category-picker";
 
 type ChargeRow = {
   id?: string;
@@ -98,12 +100,12 @@ export function ChargeDialog({
           <div className="grid gap-2"><Label>Libellé</Label><Input value={form.label ?? ""} onChange={(e) => update("label", e.target.value)} placeholder="Ex. Notaire achat maison" /></div>
           <div className="grid gap-2">
             <Label>Catégorie</Label>
-            <Select value={form.category} onValueChange={(v) => update("category", v ?? undefined)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {Object.entries(chargeCategoryLabel).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <CategoryPicker
+              value={form.category ?? "other"}
+              onChange={(v) => update("category", v)}
+              presets={[...chargeCategory]}
+              presetLabels={chargeCategoryLabel}
+            />
           </div>
           {properties.length > 0 && (
             <div className="grid gap-2">

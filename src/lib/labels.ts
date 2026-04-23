@@ -100,3 +100,35 @@ export const chargeCategoryColor: Record<string, string> = {
   tax: "var(--destructive)",
   other: "var(--muted-foreground)",
 };
+
+/**
+ * Resolve a category identifier (preset enum value or user-entered string)
+ * to its human label. Falls back to the raw value for custom categories.
+ */
+export function resolveCategoryLabel(
+  value: string,
+  presets: Record<string, string>
+): string {
+  return presets[value] ?? value;
+}
+
+/**
+ * Deterministic color for a category string. Uses presets when known,
+ * otherwise hashes the string to pick one of the chart palette values.
+ */
+const CHART_PALETTE = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
+export function resolveCategoryColor(
+  value: string,
+  presets: Record<string, string>
+): string {
+  if (presets[value]) return presets[value];
+  let h = 0;
+  for (let i = 0; i < value.length; i++) h = (h * 31 + value.charCodeAt(i)) | 0;
+  return CHART_PALETTE[Math.abs(h) % CHART_PALETTE.length];
+}

@@ -4,7 +4,6 @@ import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { chargeCategory } from "@/db/schema";
 import { assertWritable } from "@/lib/demo";
 
 const chargeSchema = z.object({
@@ -12,7 +11,7 @@ const chargeSchema = z.object({
   householdId: z.string(),
   date: z.string(),
   label: z.string().min(1),
-  category: z.enum(chargeCategory),
+  category: z.string().min(1),
   amount: z.coerce.number().positive(),
   accountId: z.string().optional().nullable(),
   propertyId: z.string().optional().nullable(),

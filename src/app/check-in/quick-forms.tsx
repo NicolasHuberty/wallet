@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Plus, Check, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { quickAddExpense, quickAddCharge, quickAddIncome } from "./actions";
+import { CategoryPicker } from "@/components/category-picker";
 import {
   expenseCategoryLabel,
   chargeCategoryLabel,
@@ -23,20 +24,17 @@ import {
 } from "@/lib/labels";
 import { expenseCategory, chargeCategory, oneOffIncomeCategory } from "@/db/schema";
 
-type ExpenseCategory = (typeof expenseCategory)[number];
-type ChargeCategory = (typeof chargeCategory)[number];
-type OneOffIncomeCat = (typeof oneOffIncomeCategory)[number];
-
-const expenseCategories = expenseCategory;
-const chargeCategories = chargeCategory;
-const incomeCategories = oneOffIncomeCategory;
+const CUSTOM_SENTINEL = "__custom__";
+const expenseCategories = [...expenseCategory] as string[];
+const chargeCategories = [...chargeCategory] as string[];
+const incomeCategories = [...oneOffIncomeCategory] as string[];
 
 export function QuickAddExpense({ householdId }: { householdId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [label, setLabel] = useState("");
-  const [category, setCategory] = useState<ExpenseCategory>("other");
+  const [category, setCategory] = useState<string>("other");
   const [amount, setAmount] = useState<number | "">("");
   const [notes, setNotes] = useState("");
 
@@ -93,21 +91,12 @@ export function QuickAddExpense({ householdId }: { householdId: string }) {
           className="h-8 text-xs"
         />
         <div className="grid grid-cols-2 gap-2">
-          <Select
+          <CategoryPicker
             value={category}
-            onValueChange={(v) => setCategory((v ?? "other") as ExpenseCategory)}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {expenseCategories.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {expenseCategoryLabel[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={setCategory}
+            presets={expenseCategories}
+            presetLabels={expenseCategoryLabel}
+          />
           <div className="relative">
             <Input
               type="number"
@@ -172,7 +161,7 @@ export function QuickAddIncome({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [label, setLabel] = useState("");
-  const [category, setCategory] = useState<OneOffIncomeCat>("bonus");
+  const [category, setCategory] = useState<string>("bonus");
   const [amount, setAmount] = useState<number | "">("");
   const [date, setDate] = useState(todayIso);
   const [notes, setNotes] = useState("");
@@ -194,7 +183,7 @@ export function QuickAddIncome({
     if (!t) return;
     setTemplateId(t.id);
     setLabel(t.label);
-    setCategory(t.category as OneOffIncomeCat);
+    setCategory(t.category);
     if (t.defaultAmount != null) setAmount(t.defaultAmount);
     setNotes(t.notes ?? "");
     setOpen(true);
@@ -307,21 +296,12 @@ export function QuickAddIncome({
             onChange={(e) => setDate(e.target.value)}
             className="h-8 text-xs"
           />
-          <Select
+          <CategoryPicker
             value={category}
-            onValueChange={(v) => setCategory((v ?? "bonus") as OneOffIncomeCat)}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {incomeCategories.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {oneOffIncomeCategoryLabel[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={setCategory}
+            presets={incomeCategories}
+            presetLabels={oneOffIncomeCategoryLabel}
+          />
           <div className="relative">
             <Input
               type="number"
@@ -385,7 +365,7 @@ export function QuickAddCharge({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [label, setLabel] = useState("");
-  const [category, setCategory] = useState<ChargeCategory>("other");
+  const [category, setCategory] = useState<string>("other");
   const [amount, setAmount] = useState<number | "">("");
   const [date, setDate] = useState(todayIso);
   const [notes, setNotes] = useState("");
@@ -407,7 +387,7 @@ export function QuickAddCharge({
     if (!t) return;
     setTemplateId(t.id);
     setLabel(t.label);
-    setCategory(t.category as ChargeCategory);
+    setCategory(t.category);
     if (t.defaultAmount != null) setAmount(t.defaultAmount);
     setNotes(t.notes ?? "");
     setOpen(true);
@@ -527,21 +507,12 @@ export function QuickAddCharge({
             onChange={(e) => setDate(e.target.value)}
             className="h-8 text-xs"
           />
-          <Select
+          <CategoryPicker
             value={category}
-            onValueChange={(v) => setCategory((v ?? "other") as ChargeCategory)}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {chargeCategories.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {chargeCategoryLabel[c]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={setCategory}
+            presets={chargeCategories}
+            presetLabels={chargeCategoryLabel}
+          />
           <div className="relative">
             <Input
               type="number"

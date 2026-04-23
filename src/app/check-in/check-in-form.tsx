@@ -915,7 +915,12 @@ export function CheckInForm({
                     className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-1.5 text-sm"
                   >
                     <div className="col-span-4 min-w-0">
-                      <div className="truncate font-medium">{e.label}</div>
+                      <a
+                        href={`/expenses/${e.id}`}
+                        className="truncate font-medium hover:text-[var(--chart-1)] hover:underline"
+                      >
+                        {e.label}
+                      </a>
                       {e.historyCount > 0 && (
                         <div className="text-[10px] text-muted-foreground">
                           {e.historyCount} mois d&apos;historique
@@ -965,7 +970,6 @@ export function CheckInForm({
                           deltaVsAvg > 0 ? "text-destructive" : "text-[var(--color-success)]"
                         }`}
                       >
-                        {deltaVsAvg > 0 ? "+" : ""}
                         {formatEUR(deltaVsAvg, { signed: true })} vs moyenne
                       </div>
                     )}
