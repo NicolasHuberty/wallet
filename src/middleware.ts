@@ -1,11 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/signup", "/api/auth"];
+const PUBLIC_EXACT = new Set(["/"]);
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public paths
+  if (PUBLIC_EXACT.has(pathname)) {
+    return NextResponse.next();
+  }
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
