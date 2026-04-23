@@ -21,8 +21,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check session cookie (better-auth sets `better-auth.session_token`)
-  const sessionCookie = request.cookies.get("better-auth.session_token");
+  // Check session cookie. better-auth uses the `__Secure-` prefix in HTTPS
+  // contexts, the plain name in HTTP (local dev). Accept either.
+  const sessionCookie =
+    request.cookies.get("better-auth.session_token") ||
+    request.cookies.get("__Secure-better-auth.session_token");
   if (!sessionCookie) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
