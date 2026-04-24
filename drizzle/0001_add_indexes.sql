@@ -1,0 +1,21 @@
+CREATE INDEX "account_household_id_idx" ON "account" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "account_snapshot_account_id_date_idx" ON "account_snapshot" USING btree ("account_id","date");--> statement-breakpoint
+CREATE INDEX "amortization_entry_mortgage_id_due_date_idx" ON "amortization_entry" USING btree ("mortgage_id","due_date");--> statement-breakpoint
+CREATE INDEX "charge_template_household_id_idx" ON "charge_template" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "dca_plan_account_id_idx" ON "dca_plan" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "holding_account_id_idx" ON "holding" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "household_user_id_idx" ON "household" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "income_template_household_id_idx" ON "income_template" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "member_household_id_idx" ON "member" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "mortgage_account_id_idx" ON "mortgage" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "mortgage_property_id_idx" ON "mortgage" USING btree ("property_id");--> statement-breakpoint
+CREATE INDEX "net_worth_snapshot_household_id_date_idx" ON "net_worth_snapshot" USING btree ("household_id","date");--> statement-breakpoint
+CREATE INDEX "one_off_charge_household_id_date_idx" ON "one_off_charge" USING btree ("household_id","date");--> statement-breakpoint
+CREATE INDEX "one_off_charge_property_id_idx" ON "one_off_charge" USING btree ("property_id");--> statement-breakpoint
+CREATE INDEX "one_off_income_household_id_date_idx" ON "one_off_income" USING btree ("household_id","date");--> statement-breakpoint
+CREATE INDEX "projection_scenario_household_id_idx" ON "projection_scenario" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "property_account_id_idx" ON "property" USING btree ("account_id");--> statement-breakpoint
+CREATE INDEX "recurring_expense_household_id_idx" ON "recurring_expense" USING btree ("household_id");--> statement-breakpoint
+CREATE INDEX "recurring_expense_actual_expense_id_month_idx" ON "recurring_expense_actual" USING btree ("expense_id","month");--> statement-breakpoint
+CREATE INDEX "recurring_expense_actual_month_idx" ON "recurring_expense_actual" USING btree ("month");--> statement-breakpoint
+CREATE INDEX "recurring_income_household_id_idx" ON "recurring_income" USING btree ("household_id");

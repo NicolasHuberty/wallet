@@ -7,6 +7,7 @@ import { z } from "zod";
 import { accountKind } from "@/db/schema";
 import { recomputeSnapshot } from "@/lib/snapshots";
 import { assertWritable } from "@/lib/demo";
+import { toDate } from "@/lib/utils";
 
 const upsertSchema = z.object({
   id: z.string().optional(),
@@ -111,7 +112,7 @@ export async function addAccountHistoryPoint(values: z.infer<typeof historyPoint
     .from(schema.accountSnapshot)
     .where(eq(schema.accountSnapshot.accountId, p.accountId));
   const sameDay = existing.find((s) => {
-    const sd = s.date as unknown as Date;
+    const sd = toDate(s.date);
     return (
       sd.getFullYear() === d.getFullYear() &&
       sd.getMonth() === d.getMonth() &&

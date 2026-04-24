@@ -96,9 +96,13 @@ export function AccountDialog({
     if (!account?.id) return;
     if (!confirm(`Supprimer "${account.name}" ?`)) return;
     start(async () => {
-      await deleteAccount(account.id!);
-      toast.success("Compte supprimé");
-      setOpen(false);
+      try {
+        await deleteAccount(account.id!);
+        toast.success("Compte supprimé");
+        setOpen(false);
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
     });
   }
 

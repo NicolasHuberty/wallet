@@ -4,6 +4,7 @@ import { formatEUR, formatDateFR } from "@/lib/format";
 import { SnapshotDialog } from "./snapshot-dialog";
 import { Button } from "@/components/ui/button";
 import { Pencil } from "lucide-react";
+import { toDate } from "@/lib/utils";
 
 export default async function SnapshotsPage() {
   const h = await getPrimaryHousehold();
@@ -36,7 +37,7 @@ export default async function SnapshotsPage() {
                 )}
                 {ordered.map((s) => (
                   <tr key={s.id} className="border-b border-border/60 last:border-none">
-                    <td className="px-5 py-3 font-medium">{formatDateFR(s.date as unknown as Date)}</td>
+                    <td className="px-5 py-3 font-medium">{formatDateFR(toDate(s.date))}</td>
                     <td className="numeric px-3 py-3 text-right">{formatEUR(s.totalAssets)}</td>
                     <td className="numeric px-3 py-3 text-right text-destructive">{formatEUR(s.totalLiabilities)}</td>
                     <td className="numeric px-3 py-3 text-right font-semibold">{formatEUR(s.netWorth)}</td>
@@ -45,7 +46,7 @@ export default async function SnapshotsPage() {
                         householdId={h.id}
                         row={{
                           id: s.id,
-                          date: (s.date as unknown as Date).toISOString().slice(0, 10),
+                          date: toDate(s.date).toISOString().slice(0, 10),
                           totalAssets: s.totalAssets,
                           totalLiabilities: s.totalLiabilities,
                         }}

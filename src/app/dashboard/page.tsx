@@ -6,7 +6,7 @@ import {
   getMonthlyCashflow,
   getSnapshots,
   getAccounts,
-  getAccountSnapshots,
+  getSnapshotsForAccounts,
   getCharges,
 } from "@/lib/queries";
 import { DEMO_MODE } from "@/lib/demo";
@@ -33,10 +33,11 @@ export default async function DashboardPage() {
   const accounts = await getAccounts(h.id);
   const charges = await getCharges(h.id);
 
-  // Per-account history for sparklines
+  // Per-account history for sparklines — batched in a single query.
+  const snapsByAccount = await getSnapshotsForAccounts(accounts.map((a) => a.id));
   const historyByAccount = new Map<string, { date: string; value: number }[]>();
   for (const a of accounts) {
-    const snaps = await getAccountSnapshots(a.id);
+    const snaps = snapsByAccount.get(a.id) ?? [];
     historyByAccount.set(
       a.id,
       snaps.map((s) => ({

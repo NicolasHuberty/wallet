@@ -16,6 +16,7 @@ import type { AccountKind } from "@/db/schema";
 import { Badge } from "@/components/ui/badge";
 import { AccountsInsights } from "./accounts-insights";
 import { AccountRow } from "./account-row";
+import { toDate } from "@/lib/utils";
 
 export default async function AccountsPage() {
   const h = await getPrimaryHousehold();
@@ -36,7 +37,7 @@ export default async function AccountsPage() {
     historyByAccount.set(
       a.id,
       snaps.map((s) => ({
-        date: (s.date as unknown as Date).toISOString(),
+        date: toDate(s.date).toISOString(),
         value: s.value,
       }))
     );
@@ -81,7 +82,7 @@ export default async function AccountsPage() {
     }));
 
   const snapshotSeries = snaps.map((s) => ({
-    date: (s.date as unknown as Date).toISOString(),
+    date: toDate(s.date).toISOString(),
     totalAssets: s.totalAssets,
     totalLiabilities: s.totalLiabilities,
     netWorth: s.netWorth,

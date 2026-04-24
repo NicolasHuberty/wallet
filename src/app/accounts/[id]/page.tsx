@@ -19,6 +19,7 @@ import {
   AddHistoryPointForm,
   DeleteHistoryButton,
 } from "./edit-controls";
+import { toDate } from "@/lib/utils";
 
 export default async function AccountDetailPage({
   params,
@@ -57,7 +58,7 @@ export default async function AccountDetailPage({
   }
 
   const series = snaps.map((s) => ({
-    date: (s.date as unknown as Date).toISOString(),
+    date: toDate(s.date).toISOString(),
     value: s.value,
   }));
 
@@ -236,7 +237,7 @@ export default async function AccountDetailPage({
                       return (
                         <tr key={s.id} className="border-b border-border/40 last:border-none">
                           <td className="px-2 py-1.5">
-                            {formatDateFR(s.date as unknown as Date)}
+                            {formatDateFR(toDate(s.date))}
                           </td>
                           <td className="numeric px-2 py-1.5 text-right">
                             {formatEUR(s.value)}
@@ -248,7 +249,7 @@ export default async function AccountDetailPage({
                             <DeleteHistoryButton
                               id={s.id}
                               accountId={acc.id}
-                              date={(s.date as unknown as Date).toISOString()}
+                              date={toDate(s.date).toISOString()}
                               value={s.value}
                             />
                           </td>

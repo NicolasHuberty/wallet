@@ -13,6 +13,7 @@ import { expenseCategoryLabel, incomeCategoryLabel, resolveCategoryLabel } from 
 import { ArrowUpRight } from "lucide-react";
 import { FlowDialog, EditFlowButton } from "./flow-dialog";
 import { Badge } from "@/components/ui/badge";
+import { toDate, toDateOrNull } from "@/lib/utils";
 
 export default async function ExpensesPage() {
   const h = await getPrimaryHousehold();
@@ -117,8 +118,8 @@ export default async function ExpensesPage() {
                     <div className="numeric font-medium">{formatEUR(e.amount)}</div>
                     <EditFlowButton householdId={h.id} members={members} kind="expense" row={{
                       id: e.id, label: e.label, category: e.category, amount: e.amount, ownership: e.ownership,
-                      ownerMemberId: e.ownerMemberId, startDate: (e.startDate as unknown as Date).toISOString().slice(0, 10),
-                      endDate: e.endDate ? (e.endDate as unknown as Date).toISOString().slice(0, 10) : null,
+                      ownerMemberId: e.ownerMemberId, startDate: toDate(e.startDate).toISOString().slice(0, 10),
+                      endDate: toDateOrNull(e.endDate)?.toISOString().slice(0, 10) ?? null,
                     }} />
                   </div>
                 </li>
@@ -149,8 +150,8 @@ export default async function ExpensesPage() {
                     <div className="numeric font-medium text-[var(--color-success)]">{formatEUR(i.amount)}</div>
                     <EditFlowButton householdId={h.id} members={members} kind="income" row={{
                       id: i.id, label: i.label, category: i.category, amount: i.amount, ownership: i.ownership,
-                      ownerMemberId: i.ownerMemberId, startDate: (i.startDate as unknown as Date).toISOString().slice(0, 10),
-                      endDate: i.endDate ? (i.endDate as unknown as Date).toISOString().slice(0, 10) : null,
+                      ownerMemberId: i.ownerMemberId, startDate: toDate(i.startDate).toISOString().slice(0, 10),
+                      endDate: toDateOrNull(i.endDate)?.toISOString().slice(0, 10) ?? null,
                     }} />
                   </div>
                 </li>

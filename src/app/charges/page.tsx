@@ -10,7 +10,9 @@ import {
 import { ChargeDialog, EditChargeButton } from "./charge-dialog";
 import { Badge } from "@/components/ui/badge";
 import { MonthlyBars, CategoryDonut } from "./charts";
-import { RefreshCw, TrendingUp } from "lucide-react";
+import { AlertTriangle, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
+import { aggregateByCategoryMonth, detectAnomalies, type Anomaly } from "@/lib/anomaly";
+import { AnomalyBadge } from "@/components/anomaly-badge";
 
 export default async function ChargesPage() {
   const h = await getPrimaryHousehold();
@@ -124,6 +126,33 @@ export default async function ChargesPage() {
   const yearlyRecurring = recurring.filter((r) => r.isYearly);
   const mostRecurrent = recurring.slice(0, 6);
 
+  // Anomaly detection (rolling 6-month average per category, >20% threshold)
+  const history = aggregateByCategoryMonth(
+    charges.map((c) => ({
+      date: c.date as unknown as Date,
+      category: c.category,
+      amount: c.amount,
+    })),
+  );
+  const anomalies = detectAnomalies(history, 0.2, 6);
+
+  // Build a lookup keyed by "category::YYYY-MM" for fast per-row flagging
+  const anomalyByKey = new Map<string, Anomaly>();
+  for (const a of anomalies) anomalyByKey.set(`${a.category}::${a.month}`, a);
+
+  // Anomalies of the current month (highlighted at the top)
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentMonthAnomalies = anomalies.filter((a) => a.month === currentMonthKey);
+  const recentAnomalies = anomalies.slice(0, 6);
+
+  const monthKeyToLabel = (key: string) => {
+    const [y, m] = key.split("-").map(Number);
+    return new Date(y, (m ?? 1) - 1, 1).toLocaleDateString("fr-BE", {
+      month: "short",
+      year: "2-digit",
+    });
+  };
+
   return (
     <>
       <PageHeader
@@ -132,6 +161,13 @@ export default async function ChargesPage() {
         action={<ChargeDialog householdId={h.id} properties={propertyOptions} />}
       />
       <div className="space-y-6 p-8">
+        {/* Anomaly band */}
+        <AnomalySection
+          currentMonthAnomalies={currentMonthAnomalies}
+          recentAnomalies={recentAnomalies}
+          monthKeyToLabel={monthKeyToLabel}
+        />
+
         {/* KPI band */}
         <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
           <Kpi label={`${thisYear}`} value={formatEUR(ytd)} sub="YTD" />
@@ -321,8 +357,16 @@ export default async function ChargesPage() {
                 Aucun frais. Ajoute ton premier frais one-shot.
               </li>
             )}
-            {sorted.map((c) => (
-              <li key={c.id} className="flex items-start gap-4 px-5 py-3 text-sm">
+            {sorted.map((c) => {
+              const d = c.date as unknown as Date;
+              const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+              const anomaly = anomalyByKey.get(`${c.category}::${monthKey}`);
+              const isFlagged = Boolean(anomaly);
+              return (
+              <li
+                key={c.id}
+                className={`flex items-start gap-4 px-5 py-3 text-sm ${isFlagged ? "bg-[color:oklch(0.97_0.05_60_/_0.35)]" : ""}`}
+              >
                 <div
                   className="mt-1 size-2 shrink-0 rounded-full"
                   style={{
@@ -337,9 +381,18 @@ export default async function ChargesPage() {
                         Hors coût de revient
                       </Badge>
                     )}
+                    {anomaly && (
+                      <AnomalyBadge
+                        deviation={anomaly.deviation}
+                        expected={anomaly.expected}
+                        total={anomaly.total}
+                        categoryLabel={resolveCategoryLabel(c.category, chargeCategoryLabel)}
+                        monthLabel={monthKeyToLabel(monthKey)}
+                      />
+                    )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>{formatDateFR(c.date as unknown as Date)}</span>
+                    <span>{formatDateFR(d)}</span>
                     <span>·</span>
                     <Badge variant="secondary" className="text-[10px]">
                       {resolveCategoryLabel(c.category, chargeCategoryLabel)}
@@ -372,7 +425,8 @@ export default async function ChargesPage() {
                   />
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       </div>
@@ -395,5 +449,95 @@ function Kpi({
       <div className="numeric mt-1.5 text-xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="mt-1 truncate text-[11px] text-muted-foreground">{sub}</div>}
     </div>
+  );
+}
+
+function AnomalySection({
+  currentMonthAnomalies,
+  recentAnomalies,
+  monthKeyToLabel,
+}: {
+  currentMonthAnomalies: Anomaly[];
+  recentAnomalies: Anomaly[];
+  monthKeyToLabel: (key: string) => string;
+}) {
+  // Nothing flagged overall → neutral banner, reassuring copy.
+  if (currentMonthAnomalies.length === 0 && recentAnomalies.length === 0) {
+    return (
+      <section className="rounded-xl border border-dashed border-border bg-muted/30 px-5 py-4">
+        <div className="flex items-center gap-3 text-sm">
+          <TrendingUp className="size-4 text-[var(--color-success,theme(colors.emerald.600))]" />
+          <div>
+            <div className="font-medium">Aucune anomalie</div>
+            <div className="text-xs text-muted-foreground">
+              Tes dépenses suivent tes habitudes — rien d&apos;inhabituel ce mois-ci.
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Show up to 6 most deviant recent anomalies; prioritise current-month ones.
+  const highlighted =
+    currentMonthAnomalies.length > 0 ? currentMonthAnomalies.slice(0, 6) : recentAnomalies;
+  const title =
+    currentMonthAnomalies.length > 0
+      ? "Anomalies détectées ce mois-ci"
+      : "Anomalies détectées récemment";
+  const subtitle =
+    currentMonthAnomalies.length > 0
+      ? "Catégories dont le total dévie de plus de 20% de la moyenne 6 mois."
+      : "Aucune anomalie ce mois-ci — voici les derniers écarts détectés.";
+
+  return (
+    <section className="rounded-xl border border-dashed border-[var(--color-warning,theme(colors.amber.400))]/60 bg-[color:oklch(0.97_0.05_80_/_0.4)] p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <AlertTriangle className="size-4 text-[var(--color-warning,theme(colors.amber.600))]" />
+        <h2 className="text-base font-semibold">{title}</h2>
+        <span className="text-xs text-muted-foreground">{subtitle}</span>
+      </div>
+      <ul className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+        {highlighted.map((a) => {
+          const infinite = !Number.isFinite(a.deviation);
+          const Icon = infinite ? AlertTriangle : a.deviation > 0 ? TrendingUp : TrendingDown;
+          const tone = infinite
+            ? "text-[var(--color-warning,theme(colors.amber.700))]"
+            : a.deviation > 0
+              ? "text-destructive"
+              : "text-[var(--color-success,theme(colors.emerald.700))]";
+          const categoryLabel = resolveCategoryLabel(a.category, chargeCategoryLabel);
+          const pct = infinite
+            ? "nouveau"
+            : `${a.deviation > 0 ? "+" : ""}${Math.round(a.deviation * 100)}%`;
+          return (
+            <li
+              key={`${a.category}-${a.month}`}
+              className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-2.5 text-sm"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Icon className={`size-3.5 ${tone}`} />
+                  <span className="truncate font-medium">{categoryLabel}</span>
+                  <span className={`numeric text-[11px] font-semibold tabular-nums ${tone}`}>
+                    {pct}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {monthKeyToLabel(a.month)} · observé{" "}
+                  <span className="tabular-nums">{formatEUR(a.total)}</span>
+                  {Number.isFinite(a.deviation) && (
+                    <>
+                      {" "}
+                      vs <span className="tabular-nums">{formatEUR(a.expected)}</span> attendu
+                    </>
+                  )}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

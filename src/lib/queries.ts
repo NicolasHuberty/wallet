@@ -1,5 +1,5 @@
 import { db, schema } from "@/db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and, gt, lt, inArray } from "drizzle-orm";
 import { headers } from "next/headers";
 import { isLiability } from "./labels";
 import { auth } from "./auth";
@@ -86,15 +86,23 @@ export async function getNetWorth(householdId: string) {
 
 export async function getActiveMortgages(householdId: string) {
   const accounts = await getAccounts(householdId);
-  const loanAccountIds = accounts.filter((a) => a.kind === "loan" && !a.archivedAt).map((a) => a.id);
+  const loanAccounts = accounts.filter((a) => a.kind === "loan" && !a.archivedAt);
+  const loanAccountIds = loanAccounts.map((a) => a.id);
   if (loanAccountIds.length === 0) return [];
-  const rows = await db.select().from(schema.mortgage);
-  return rows
-    .filter((m) => loanAccountIds.includes(m.accountId) && m.remainingBalance > 0)
-    .map((m) => ({
-      mortgage: m,
-      account: accounts.find((a) => a.id === m.accountId)!,
-    }));
+  const rows = await db
+    .select()
+    .from(schema.mortgage)
+    .where(
+      and(
+        inArray(schema.mortgage.accountId, loanAccountIds),
+        gt(schema.mortgage.remainingBalance, 0),
+      ),
+    );
+  const accountById = new Map(loanAccounts.map((a) => [a.id, a]));
+  return rows.map((m) => ({
+    mortgage: m,
+    account: accountById.get(m.accountId)!,
+  }));
 }
 
 export async function getMonthlyCashflow(householdId: string) {
@@ -124,19 +132,52 @@ export async function getDcaPlans(householdId: string) {
   const accs = await getAccounts(householdId);
   const accIds = accs.map((a) => a.id);
   if (accIds.length === 0) return [];
-  return db.select().from(schema.dcaPlan);
+  return db.select().from(schema.dcaPlan).where(inArray(schema.dcaPlan.accountId, accIds));
 }
 
 export async function getProperties(householdId: string) {
   const accs = await getAccounts(householdId);
-  const result: Array<{ account: typeof accs[number]; property: typeof schema.property.$inferSelect; mortgage: typeof schema.mortgage.$inferSelect | null }> = [];
-  for (const a of accs) {
-    if (a.kind !== "real_estate") continue;
-    const [p] = await db.select().from(schema.property).where(eq(schema.property.accountId, a.id));
+  const realEstateAccs = accs.filter((a) => a.kind === "real_estate");
+  if (realEstateAccs.length === 0) {
+    return [] as Array<{
+      account: typeof accs[number];
+      property: typeof schema.property.$inferSelect;
+      mortgage: typeof schema.mortgage.$inferSelect | null;
+    }>;
+  }
+  const accIds = realEstateAccs.map((a) => a.id);
+
+  // Batch fetch: all properties for these accounts + all mortgages for those
+  // properties in two queries instead of 2×N.
+  const properties = await db
+    .select()
+    .from(schema.property)
+    .where(inArray(schema.property.accountId, accIds));
+  const propIds = properties.map((p) => p.id);
+  const mortgages = propIds.length
+    ? await db
+        .select()
+        .from(schema.mortgage)
+        .where(inArray(schema.mortgage.propertyId, propIds))
+    : [];
+
+  const propByAccount = new Map(properties.map((p) => [p.accountId, p]));
+  const mortgageByProperty = new Map<string, typeof schema.mortgage.$inferSelect>();
+  for (const m of mortgages) {
+    if (m.propertyId && !mortgageByProperty.has(m.propertyId)) {
+      mortgageByProperty.set(m.propertyId, m);
+    }
+  }
+
+  const result: Array<{
+    account: typeof accs[number];
+    property: typeof schema.property.$inferSelect;
+    mortgage: typeof schema.mortgage.$inferSelect | null;
+  }> = [];
+  for (const a of realEstateAccs) {
+    const p = propByAccount.get(a.id);
     if (!p) continue;
-    const loans = await db.select().from(schema.mortgage).where(eq(schema.mortgage.propertyId, p.id));
-    const m = loans[0] ?? null;
-    result.push({ account: a, property: p, mortgage: m });
+    result.push({ account: a, property: p, mortgage: mortgageByProperty.get(p.id) ?? null });
   }
   return result;
 }
@@ -175,15 +216,41 @@ export async function getAccountSnapshots(accountId: string) {
     .orderBy(asc(schema.accountSnapshot.date));
 }
 
+/**
+ * Batch variant of {@link getAccountSnapshots}: fetches all snapshots for the
+ * given accounts in a single SQL query and groups them by `accountId` in JS.
+ * Accounts with no snapshots appear as empty arrays in the returned map.
+ */
+export async function getSnapshotsForAccounts(
+  accountIds: string[],
+): Promise<Map<string, typeof schema.accountSnapshot.$inferSelect[]>> {
+  const out = new Map<string, typeof schema.accountSnapshot.$inferSelect[]>();
+  for (const id of accountIds) out.set(id, []);
+  if (accountIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(schema.accountSnapshot)
+    .where(inArray(schema.accountSnapshot.accountId, accountIds))
+    .orderBy(asc(schema.accountSnapshot.date));
+  for (const r of rows) {
+    const bucket = out.get(r.accountId);
+    if (bucket) bucket.push(r);
+    else out.set(r.accountId, [r]);
+  }
+  return out;
+}
+
 export async function getExpenseActualsByHousehold(householdId: string) {
   const expenses = await db
-    .select()
+    .select({ id: schema.recurringExpense.id })
     .from(schema.recurringExpense)
     .where(eq(schema.recurringExpense.householdId, householdId));
   const expenseIds = expenses.map((e) => e.id);
   if (expenseIds.length === 0) return [] as typeof schema.recurringExpenseActual.$inferSelect[];
-  const actuals = await db.select().from(schema.recurringExpenseActual);
-  return actuals.filter((a) => expenseIds.includes(a.expenseId));
+  return db
+    .select()
+    .from(schema.recurringExpenseActual)
+    .where(inArray(schema.recurringExpenseActual.expenseId, expenseIds));
 }
 
 export async function getChargeTemplates(householdId: string) {
@@ -205,4 +272,45 @@ export async function getIncomeTemplates(householdId: string) {
     .select()
     .from(schema.incomeTemplate)
     .where(eq(schema.incomeTemplate.householdId, householdId));
+}
+
+/**
+ * For each account belonging to a household, returns the most recent
+ * {@link schema.accountSnapshot} whose date is strictly before `monthStart`.
+ * Accounts without any prior snapshot are omitted from the returned map.
+ *
+ * Used by the check-in form to pre-fill the "Avant" column with the value at
+ * the end of the month preceding the check-in, rather than the always-current
+ * `account.currentValue`.
+ */
+export async function getLastAccountSnapshotsBeforeMonth(
+  householdId: string,
+  monthStart: Date,
+): Promise<
+  Record<string, { value: number; date: Date }>
+> {
+  const accounts = await db
+    .select({ id: schema.account.id })
+    .from(schema.account)
+    .where(eq(schema.account.householdId, householdId));
+  const ids = accounts.map((a) => a.id);
+  if (ids.length === 0) return {};
+
+  const rows = await db
+    .select()
+    .from(schema.accountSnapshot)
+    .where(
+      and(
+        inArray(schema.accountSnapshot.accountId, ids),
+        lt(schema.accountSnapshot.date, monthStart),
+      ),
+    )
+    .orderBy(asc(schema.accountSnapshot.date));
+
+  const out: Record<string, { value: number; date: Date }> = {};
+  for (const r of rows) {
+    const d = r.date as unknown as Date;
+    out[r.accountId] = { value: r.value, date: d };
+  }
+  return out;
 }

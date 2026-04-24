@@ -50,8 +50,10 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarDays,
+  RotateCcw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import type { AccountPrefill } from "@/lib/checkin-prefill";
 
 type AccountRow = {
   id: string;
@@ -62,6 +64,8 @@ type AccountRow = {
   annualYieldPct: number | null;
   monthlyContribution: number | null;
   annualAppreciationPct: number | null;
+  /** Pre-computed starting values + estimation for the selected month. */
+  prefill: AccountPrefill;
 };
 
 type MortgageRow = {
@@ -220,33 +224,34 @@ export function CheckInForm({
 
   const canGoNext = selectedMonth < todayKey;
 
-  // Computes the auto-growth for a given account (monthly compounded rate × current value)
-  function autoGrowth(a: AccountRow): number {
-    const rate =
-      a.kind === "real_estate"
-        ? a.annualAppreciationPct ?? 0
-        : a.annualYieldPct ?? 0;
-    if (!rate) return 0;
-    const monthly = Math.pow(1 + rate / 100, 1 / 12) - 1;
-    return Math.max(0, a.currentValue) * monthly;
-  }
-
-  function autoContribution(a: AccountRow): number {
-    if (a.kind === "real_estate" || a.kind === "loan" || a.kind === "credit_card") return 0;
-    return a.monthlyContribution ?? 0;
-  }
-
-  // Initial per-row state
+  // Initial per-row state — pre-filled from `prefill` (computed server-side
+  // from the previous-month snapshot plus expected DCA / amortization).
   const [rowState, setRowState] = useState<Record<string, RowInput>>(() => {
     const out: Record<string, RowInput> = {};
     for (const a of accounts) {
       out[a.id] = {
-        growth: round2(autoGrowth(a)),
-        contribution: round2(autoContribution(a)),
+        growth: round2(a.prefill.growth),
+        contribution: round2(a.prefill.contribution),
       };
     }
     return out;
   });
+
+  // When the selected month changes the server returns a new set of accounts
+  // with fresh prefills → resync local state.
+  useEffect(() => {
+    setRowState(() => {
+      const out: Record<string, RowInput> = {};
+      for (const a of accounts) {
+        out[a.id] = {
+          growth: round2(a.prefill.growth),
+          contribution: round2(a.prefill.contribution),
+        };
+      }
+      return out;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth]);
 
   // Mortgage state: pre-fill from amortization entry for the selected month
   const [mortgageState, setMortgageState] = useState<Record<string, MortgageInput>>(() => {
@@ -287,19 +292,42 @@ export function CheckInForm({
   function updateRow(id: string, key: keyof RowInput, value: number) {
     setRowState((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }
+  /**
+   * Reset the growth / contribution inputs of a single row back to the
+   * server-computed estimation (previous month + expected DCA / interest).
+   */
+  function resetRow(id: string) {
+    const a = accounts.find((acc) => acc.id === id);
+    if (!a) return;
+    setRowState((prev) => ({
+      ...prev,
+      [id]: {
+        growth: round2(a.prefill.growth),
+        contribution: round2(a.prefill.contribution),
+      },
+    }));
+  }
   function updateMortgage(id: string, key: keyof MortgageInput, value: number) {
     setMortgageState((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }
 
+  function previousValueFor(a: AccountRow): number {
+    // Prefer the snapshot-based value; fall back to currentValue for
+    // accounts with no prior history (first check-in ever).
+    if (a.prefill.previousSource !== "none") return a.prefill.previousValue;
+    return a.currentValue;
+  }
+
   function newValueFor(a: AccountRow): number {
     const s = rowState[a.id];
-    if (!s) return a.currentValue;
+    const base = previousValueFor(a);
+    if (!s) return base;
     if (isLiability(a.kind)) {
       // Account value is negative; principal paid makes it less negative → newValue = prev + principal
       // For loan account we use contribution field as "principal paid" if amortization unavailable.
-      return a.currentValue + s.contribution + s.growth;
+      return base + s.contribution + s.growth;
     }
-    return a.currentValue + s.growth + s.contribution;
+    return base + s.growth + s.contribution;
   }
 
   function newMortgageBalance(m: MortgageRow): number {
@@ -331,7 +359,7 @@ export function CheckInForm({
 
   const totalDCA = accounts.reduce((s, a) => s + (a.monthlyContribution ?? 0), 0);
   const monthlyInterestIncome = accounts.reduce(
-    (s, a) => s + (isLiability(a.kind) ? 0 : autoGrowth(a)),
+    (s, a) => s + (isLiability(a.kind) ? 0 : a.prefill.growth),
     0
   );
   const realSurplus = cashflow.net - totalDCA;
@@ -356,10 +384,14 @@ export function CheckInForm({
           householdId,
           month: selectedMonth,
           note: note || null,
-          rows: accounts.map((a) => ({
-            accountId: a.id,
-            newValue: newValueFor(a),
-          })),
+          rows: accounts
+            // Skip accounts created after this month — we shouldn't overwrite
+            // their currentValue with a 0-based estimate.
+            .filter((a) => !a.prefill.isFutureAccount)
+            .map((a) => ({
+              accountId: a.id,
+              newValue: newValueFor(a),
+            })),
           mortgageRows: mortgages.map((m) => ({
             mortgageId: m.mortgageId,
             remainingBalance: newMortgageBalance(m),
@@ -434,8 +466,8 @@ export function CheckInForm({
             <h2 className="text-base font-semibold">Mise à jour mensuelle</h2>
             <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Sparkles className="size-3 text-[var(--chart-1)]" />
-              Champs pré-remplis automatiquement (intérêts, appréciation, amortissement). Ajuste si
-              besoin.
+              Pré-remplissage depuis le mois précédent + DCA / intérêts / amortissement
+              attendus. Ajuste si besoin — « réinitialiser » annule tes modifications.
             </p>
             {lastCheckInDate && (
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -516,7 +548,7 @@ export function CheckInForm({
           </div>
 
           {groups.map(([kind, rows]) => {
-            const subtotalOld = rows.reduce((s, a) => s + a.currentValue, 0);
+            const subtotalOld = rows.reduce((s, a) => s + previousValueFor(a), 0);
             const subtotalNew = rows.reduce((s, a) => s + newValueFor(a), 0);
             const deltaKind = subtotalNew - subtotalOld;
             return (
@@ -540,8 +572,9 @@ export function CheckInForm({
                 <div>
                   {rows.map((a) => {
                     const s = rowState[a.id];
+                    const prev = previousValueFor(a);
                     const nv = newValueFor(a);
-                    const delta = nv - a.currentValue;
+                    const delta = nv - prev;
                     const isRealEstate = a.kind === "real_estate";
                     const contribLabel =
                       a.kind === "loan" || a.kind === "credit_card" ? "Capital payé" : "Apport";
@@ -555,10 +588,27 @@ export function CheckInForm({
                       ? a.annualAppreciationPct
                       : a.annualYieldPct;
 
+                    const pf = a.prefill;
+                    const disabled = pf.isFutureAccount || pf.isFullyRepaid;
+                    // Detect whether the user has modified the pre-filled values.
+                    const isCustomized =
+                      s != null &&
+                      (Math.abs((s.growth ?? 0) - pf.growth) > 0.005 ||
+                        Math.abs((s.contribution ?? 0) - pf.contribution) > 0.005);
+                    const prevHintLabel = pf.isFutureAccount
+                      ? "Compte créé après ce mois"
+                      : pf.isFullyRepaid
+                        ? "Soldé"
+                        : pf.isFirstMonth
+                          ? "Première mise à jour"
+                          : pf.previousSource === "current"
+                            ? "valeur actuelle"
+                            : "mois précédent";
+
                     return (
                       <div
                         key={a.id}
-                        className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-2 text-sm"
+                        className={`grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-2 text-sm ${disabled ? "opacity-60" : ""}`}
                       >
                         <div className="col-span-4 min-w-0">
                           <div className="truncate font-medium">{a.name}</div>
@@ -581,7 +631,10 @@ export function CheckInForm({
                         </div>
 
                         <div className="col-span-2 text-right text-xs text-muted-foreground numeric">
-                          {formatEUR(a.currentValue)}
+                          <div>{formatEUR(prev)}</div>
+                          <div className="text-[10px] text-muted-foreground/70">
+                            {prevHintLabel}
+                          </div>
                         </div>
 
                         <div className="col-span-2">
@@ -595,6 +648,7 @@ export function CheckInForm({
                                   updateRow(a.id, "growth", Number(e.target.value))
                                 }
                                 className="h-8 pr-6 text-right tabular-nums"
+                                disabled={disabled}
                               />
                               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
                                 €
@@ -617,6 +671,7 @@ export function CheckInForm({
                                 }
                                 className="h-8 pr-6 text-right tabular-nums"
                                 title={contribLabel}
+                                disabled={disabled}
                               />
                               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
                                 €
@@ -628,7 +683,29 @@ export function CheckInForm({
                         </div>
 
                         <div className="col-span-1 text-right text-xs font-medium numeric">
-                          {formatEUR(nv)}
+                          <div>{formatEUR(nv)}</div>
+                          {!disabled && !pf.isFirstMonth && (
+                            <div className="flex items-center justify-end gap-1 text-[10px] font-normal text-muted-foreground/80">
+                              {isCustomized ? (
+                                <button
+                                  type="button"
+                                  onClick={() => resetRow(a.id)}
+                                  className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                                  title={`Réinitialiser à l'estimation ${formatEUR(pf.expectedValue)}`}
+                                >
+                                  <RotateCcw className="size-2.5" />
+                                  réinitialiser
+                                </button>
+                              ) : (
+                                <span
+                                  className="text-[10px] text-muted-foreground/70"
+                                  title="Valeur estimée à partir du mois précédent"
+                                >
+                                  estimation
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         <div className="col-span-1 flex justify-end">

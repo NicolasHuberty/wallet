@@ -8,6 +8,7 @@ import { PropertyWizard } from "./property-wizard";
 import { MortgageDialog, EditMortgageButton, GenerateAmortizationButton } from "./mortgage-dialog";
 import { ImportAmortizationButton } from "./amortization-import";
 import { AmortizationCharts } from "./amortization-charts";
+import { PrepaymentSimulator } from "./prepayment-simulator";
 import { ChargeDialog, EditChargeButton } from "@/app/charges/charge-dialog";
 import { chargeCategoryLabel, chargeCategoryColor } from "@/lib/labels";
 import { Badge } from "@/components/ui/badge";
@@ -191,6 +192,22 @@ export default async function RealEstatePage() {
                       </div>
                     </div>
 
+                    {entries.length === 0 && mortgage.remainingBalance > 0 && (
+                      <PrepaymentSimulator
+                        mortgage={{
+                          principalRemaining: mortgage.remainingBalance,
+                          annualRate: mortgage.interestRatePct,
+                          monthsRemaining: mortgage.termMonths,
+                          monthlyPayment: mortgage.monthlyPayment,
+                        }}
+                        startDate={new Date(
+                          new Date().getFullYear(),
+                          new Date().getMonth() + 1,
+                          1,
+                        ).toISOString()}
+                      />
+                    )}
+
                     {entries.length > 0 && (
                       <>
                         <AmortizationCharts
@@ -203,6 +220,39 @@ export default async function RealEstatePage() {
                           }))}
                           initialPrincipal={mortgage.principal}
                         />
+
+                        {(() => {
+                          const now = new Date();
+                          // Find the first entry still to be paid (due date >= today).
+                          // Fallback to the first entry if the loan hasn't started yet.
+                          const futureEntries = entries.filter((e) => (e.dueDate as unknown as Date).getTime() >= now.getTime());
+                          const nextEntry = futureEntries[0] ?? entries[entries.length - 1];
+                          const paidCount = entries.length - futureEntries.length;
+                          const monthsRemaining = Math.max(0, entries.length - paidCount);
+                          // Starting balance for the simulation = balance BEFORE the next
+                          // payment (i.e. balance after the previous entry). If no entry
+                          // is paid yet, that's the full principal.
+                          const idx = entries.indexOf(nextEntry);
+                          const startingBalance = idx > 0
+                            ? entries[idx - 1].balance
+                            : mortgage.principal;
+                          const simStart = new Date(
+                            (nextEntry.dueDate as unknown as Date).getFullYear(),
+                            (nextEntry.dueDate as unknown as Date).getMonth(),
+                            1,
+                          );
+                          return (
+                            <PrepaymentSimulator
+                              mortgage={{
+                                principalRemaining: startingBalance,
+                                annualRate: mortgage.interestRatePct,
+                                monthsRemaining,
+                                monthlyPayment: mortgage.monthlyPayment,
+                              }}
+                              startDate={simStart.toISOString()}
+                            />
+                          );
+                        })()}
 
                         <details className="mt-4 rounded-lg border border-border">
                           <summary className="cursor-pointer border-b border-border bg-muted/30 px-4 py-2 text-sm font-medium">

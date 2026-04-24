@@ -12,11 +12,13 @@ import {
   getChargeTemplates,
   getOneOffIncomes,
   getIncomeTemplates,
+  getLastAccountSnapshotsBeforeMonth,
 } from "@/lib/queries";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { CheckInForm } from "./check-in-form";
 import { HistorySection } from "./history-section";
+import { computeAccountPrefill } from "@/lib/checkin-prefill";
 
 export default async function CheckInPage({
   searchParams,
@@ -258,19 +260,62 @@ export default async function CheckInPage({
   // Loan accounts linked to an active mortgage are edited through the mortgage row only.
   const mortgageAccountIds = new Set(mortgages.map((m) => m.account.id));
 
+  // Fetch last snapshot *before* the selected month for each account. Used to
+  // pre-fill "Avant" and compute estimated post-update values without relying
+  // on `account.currentValue` — which might already reflect a future month.
+  const lastSnapByAccount = await getLastAccountSnapshotsBeforeMonth(
+    h.id,
+    monthStart,
+  );
+
+  // Helper to pick the amortization entry closest to `monthStart` for a loan
+  // account that has a linked mortgage.
+  const monthKeyFor = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const selectedMonthKey = monthKeyFor(monthStart);
+  function pickAmortizationForAccount(
+    accountId: string,
+  ): { principal: number } | null {
+    const m = mortgages.find((mm) => mm.account.id === accountId);
+    if (!m) return null;
+    const rows = amortByMortgage[m.mortgage.id] ?? [];
+    if (rows.length === 0) return null;
+    const exact = rows.find((r) => r.dueDate.slice(0, 7) === selectedMonthKey);
+    if (exact) return { principal: exact.principal };
+    const future = rows.find((r) => r.dueDate.slice(0, 7) >= selectedMonthKey);
+    return future ? { principal: future.principal } : null;
+  }
+
   const activeAccounts = accounts
     .filter((a) => !a.archivedAt)
     .filter((a) => !mortgageAccountIds.has(a.id))
-    .map((a) => ({
-      id: a.id,
-      name: a.name,
-      kind: a.kind,
-      institution: a.institution,
-      currentValue: a.currentValue,
-      annualYieldPct: a.annualYieldPct,
-      monthlyContribution: a.monthlyContribution,
-      annualAppreciationPct: propertyRateByAccount[a.id] ?? null,
-    }));
+    .map((a) => {
+      const prefill = computeAccountPrefill({
+        account: {
+          id: a.id,
+          kind: a.kind,
+          currentValue: a.currentValue,
+          annualYieldPct: a.annualYieldPct,
+          annualAppreciationPct: propertyRateByAccount[a.id] ?? null,
+          monthlyContribution: a.monthlyContribution,
+          createdAt: a.createdAt as unknown as Date | null,
+        },
+        lastSnapshot: lastSnapByAccount[a.id] ?? null,
+        monthStart,
+        amortization: pickAmortizationForAccount(a.id),
+      });
+      return {
+        id: a.id,
+        name: a.name,
+        kind: a.kind,
+        institution: a.institution,
+        currentValue: a.currentValue,
+        annualYieldPct: a.annualYieldPct,
+        monthlyContribution: a.monthlyContribution,
+        annualAppreciationPct: propertyRateByAccount[a.id] ?? null,
+        prefill,
+      };
+    });
 
   const mortgageRows = mortgages.map((m) => ({
     mortgageId: m.mortgage.id,
