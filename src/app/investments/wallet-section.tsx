@@ -89,19 +89,19 @@ function WalletHeader({ wallet }: { wallet: Wallet }) {
     (dca === "" ? wallet.monthlyContribution != null : Number(dca) !== wallet.monthlyContribution);
 
   return (
-    <div className="border-b border-border p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-base font-semibold">{wallet.name}</h2>
+    <div className="border-b border-border p-4 md:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-semibold">{wallet.name}</h2>
           {wallet.institution && (
-            <p className="text-xs text-muted-foreground">{wallet.institution}</p>
+            <p className="truncate text-xs text-muted-foreground">{wallet.institution}</p>
           )}
         </div>
         <Button size="sm" onClick={save} disabled={pending || !dirty}>
           <Save className="size-4" /> {pending ? "Enregistrement…" : "Enregistrer"}
         </Button>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-3 md:gap-4">
         <div className="grid gap-1.5">
           <Label className="text-xs text-muted-foreground">Total du wallet</Label>
           <div className="relative">
@@ -229,8 +229,8 @@ function AllocationTable({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-5">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-semibold">ETF du wallet</h3>
           <Badge variant="secondary" className="text-[10px]">
             {holdings.length}
@@ -238,110 +238,180 @@ function AllocationTable({
           {holdings.length > 0 && (
             <Badge
               variant="outline"
-              className={`text-[10px] ${badSum ? "border-amber-500 text-amber-500" : "border-[var(--color-success)] text-[var(--color-success)]"}`}
+              className={`text-[10px] tabular-nums ${badSum ? "border-amber-500 text-amber-500" : "border-[var(--color-success)] text-[var(--color-success)]"}`}
             >
               {badSum && <TriangleAlert className="mr-1 size-3" />}
-              Σ allocations : {sumRounded}%
+              Σ {sumRounded}%
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {holdings.length > 0 && sum > 0 && sumRounded !== 100 && (
             <Button size="sm" variant="ghost" onClick={normalize}>
-              <Scale className="size-3.5" /> Normaliser à 100 %
+              <Scale className="size-3.5" /> Normaliser
             </Button>
           )}
           <HoldingDialog accountId={accountId} />
           {dirty && holdings.length > 0 && (
             <Button size="sm" onClick={saveAll} disabled={pending}>
               <Save className="size-4" />
-              {pending ? "Enregistrement…" : "Enregistrer allocations"}
+              {pending ? "Enregistrement…" : "Enregistrer"}
             </Button>
           )}
         </div>
       </div>
 
       {holdings.length === 0 ? (
-        <div className="border-t border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
+        <div className="border-t border-border bg-muted/10 p-6 text-center text-sm text-muted-foreground md:p-8">
           Aucun ETF. Ajoute-les manuellement ou via l&apos;import Revolut.
         </div>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-y border-border bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-5 py-2 text-left font-medium">Ticker / ISIN</th>
-              <th className="px-3 py-2 text-left font-medium">Nom</th>
-              <th className="px-3 py-2 text-right font-medium w-28">Allocation</th>
-              <th className="px-3 py-2 text-right font-medium w-28">Valeur estimée</th>
-              <th className="px-5 py-2" />
-            </tr>
-          </thead>
-          <tbody>
+        <>
+          {/* Desktop: full editable table */}
+          <table className="hidden w-full text-sm md:table">
+            <thead>
+              <tr className="border-y border-border bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-5 py-2 text-left font-medium">Ticker / ISIN</th>
+                <th className="px-3 py-2 text-left font-medium">Nom</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Allocation</th>
+                <th className="w-28 px-3 py-2 text-right font-medium">Valeur estimée</th>
+                <th className="px-5 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map((h) => {
+                const pct = alloc[h.id] ?? 0;
+                const value = (walletValue * pct) / 100;
+                return (
+                  <tr key={h.id} className="border-b border-border/60 last:border-none">
+                    <td className="px-5 py-2.5">
+                      <div className="font-mono font-medium">{h.ticker}</div>
+                      {h.isin && (
+                        <div className="text-[10px] font-mono text-muted-foreground">{h.isin}</div>
+                      )}
+                    </td>
+                    <td className="max-w-[260px] truncate px-3 py-2.5 text-xs text-muted-foreground">
+                      {h.name ?? "—"}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min={0}
+                          max={100}
+                          value={pct}
+                          onChange={(e) => update(h.id, Number(e.target.value))}
+                          className="h-8 pr-6 text-right tabular-nums"
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
+                          %
+                        </span>
+                      </div>
+                    </td>
+                    <td className="numeric px-3 py-2.5 text-right text-xs font-medium tabular-nums">
+                      {formatEUR(value)}
+                    </td>
+                    <td className="px-5 py-2.5 text-right">
+                      <div className="flex justify-end gap-1">
+                        <HoldingDialog accountId={accountId} holding={h} />
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => remove(h.id, h.ticker)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border bg-muted/30">
+                <td
+                  colSpan={2}
+                  className="px-5 py-2 text-xs uppercase tracking-wider text-muted-foreground"
+                >
+                  Total alloué
+                </td>
+                <td className="numeric px-3 py-2 text-right text-xs font-semibold tabular-nums">
+                  {sumRounded}%
+                </td>
+                <td className="numeric px-3 py-2 text-right text-xs font-semibold tabular-nums">
+                  {formatEUR((walletValue * sumRounded) / 100)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+
+          {/* Mobile: stacked editable cards (one per holding) with a total
+           * row at the bottom that mirrors the table's tfoot. */}
+          <ul className="divide-y divide-border border-y border-border md:hidden">
             {holdings.map((h) => {
               const pct = alloc[h.id] ?? 0;
               const value = (walletValue * pct) / 100;
               return (
-                <tr key={h.id} className="border-b border-border/60 last:border-none">
-                  <td className="px-5 py-2.5">
-                    <div className="font-mono font-medium">{h.ticker}</div>
-                    {h.isin && (
-                      <div className="text-[10px] font-mono text-muted-foreground">{h.isin}</div>
+                <li key={h.id} className="flex items-start gap-3 px-4 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-xs font-medium">{h.ticker}</span>
+                    </div>
+                    {h.name && (
+                      <div className="truncate text-[11px] text-muted-foreground">{h.name}</div>
                     )}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[260px] truncate">
-                    {h.name ?? "—"}
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <div className="relative">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min={0}
-                        max={100}
-                        value={pct}
-                        onChange={(e) => update(h.id, Number(e.target.value))}
-                        className="h-8 pr-6 text-right tabular-nums"
-                      />
-                      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                        %
+                    {h.isin && (
+                      <div className="truncate font-mono text-[10px] text-muted-foreground">
+                        {h.isin}
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="relative w-24">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min={0}
+                          max={100}
+                          value={pct}
+                          onChange={(e) => update(h.id, Number(e.target.value))}
+                          className="h-8 pr-6 text-right tabular-nums"
+                          aria-label={`Allocation ${h.ticker}`}
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
+                          %
+                        </span>
+                      </div>
+                      <span className="numeric text-xs font-medium tabular-nums">
+                        = {formatEUR(value)}
                       </span>
                     </div>
-                  </td>
-                  <td className="numeric px-3 py-2.5 text-right text-xs font-medium">
-                    {formatEUR(value)}
-                  </td>
-                  <td className="px-5 py-2.5 text-right">
-                    <div className="flex justify-end gap-1">
-                      <HoldingDialog accountId={accountId} holding={h} />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => remove(h.id, h.ticker)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
+                  </div>
+                  <div className="flex shrink-0 items-start gap-1">
+                    <HoldingDialog accountId={accountId} holding={h} />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 text-destructive hover:text-destructive"
+                      onClick={() => remove(h.id, h.ticker)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </li>
               );
             })}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-border bg-muted/30">
-              <td colSpan={2} className="px-5 py-2 text-xs uppercase tracking-wider text-muted-foreground">
-                Total alloué
-              </td>
-              <td className="numeric px-3 py-2 text-right text-xs font-semibold">
-                {sumRounded}%
-              </td>
-              <td className="numeric px-3 py-2 text-right text-xs font-semibold">
-                {formatEUR((walletValue * sumRounded) / 100)}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
+            <li className="flex items-center justify-between bg-muted/30 px-4 py-2.5 text-xs uppercase tracking-wider text-muted-foreground">
+              <span>Total alloué</span>
+              <span className="numeric flex items-baseline gap-3 text-xs font-semibold tabular-nums text-foreground">
+                <span>{sumRounded}%</span>
+                <span>{formatEUR((walletValue * sumRounded) / 100)}</span>
+              </span>
+            </li>
+          </ul>
+        </>
       )}
     </div>
   );

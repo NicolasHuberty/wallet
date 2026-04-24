@@ -120,8 +120,8 @@ export default async function AccountDetailPage({
           </Link>
         }
       />
-      <div className="space-y-6 p-8">
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="space-y-6 p-4 md:p-8">
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
           <Kpi
             label="Valeur actuelle"
             value={formatEUR(current)}
@@ -150,12 +150,14 @@ export default async function AccountDetailPage({
           />
         </section>
 
-        <section className="rounded-xl border border-border bg-card p-5">
-          <div className="mb-4 flex items-center justify-between">
+        <section className="rounded-xl border border-border bg-card p-4 md:p-5">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:mb-4">
             <h2 className="text-base font-semibold">Évolution du compte</h2>
             <div className="text-xs text-muted-foreground">
               {series.length} point{series.length > 1 ? "s" : ""} · total{" "}
-              {formatEUR(totalVariation, { signed: true })}
+              <span className="numeric tabular-nums">
+                {formatEUR(totalVariation, { signed: true })}
+              </span>
             </div>
           </div>
           {series.length < 2 ? (
@@ -220,7 +222,8 @@ export default async function AccountDetailPage({
               </p>
             ) : (
               <div className="max-h-64 overflow-y-auto">
-                <table className="w-full text-xs">
+                {/* Desktop table */}
+                <table className="hidden w-full text-xs md:table">
                   <thead className="sticky top-0 bg-card">
                     <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
                       <th className="px-2 py-2 text-left font-medium">Date</th>
@@ -233,16 +236,19 @@ export default async function AccountDetailPage({
                     {snaps.slice().reverse().map((s, i, arr) => {
                       const prev = arr[i + 1];
                       const delta = prev ? s.value - prev.value : 0;
-                      const sign = delta > 0 ? "text-[var(--color-success)]" : delta < 0 ? "text-destructive" : "text-muted-foreground";
+                      const sign =
+                        delta > 0
+                          ? "text-[var(--color-success)]"
+                          : delta < 0
+                            ? "text-destructive"
+                            : "text-muted-foreground";
                       return (
                         <tr key={s.id} className="border-b border-border/40 last:border-none">
-                          <td className="px-2 py-1.5">
-                            {formatDateFR(toDate(s.date))}
-                          </td>
-                          <td className="numeric px-2 py-1.5 text-right">
+                          <td className="px-2 py-1.5">{formatDateFR(toDate(s.date))}</td>
+                          <td className="numeric px-2 py-1.5 text-right tabular-nums">
                             {formatEUR(s.value)}
                           </td>
-                          <td className={`numeric px-2 py-1.5 text-right ${sign}`}>
+                          <td className={`numeric px-2 py-1.5 text-right tabular-nums ${sign}`}>
                             {prev ? formatEUR(delta, { signed: true }) : "—"}
                           </td>
                           <td className="px-1 py-1.5 text-right">
@@ -258,6 +264,48 @@ export default async function AccountDetailPage({
                     })}
                   </tbody>
                 </table>
+                {/* Mobile stacked list */}
+                <ul className="divide-y divide-border/40 md:hidden">
+                  {snaps
+                    .slice()
+                    .reverse()
+                    .map((s, i, arr) => {
+                      const prev = arr[i + 1];
+                      const delta = prev ? s.value - prev.value : 0;
+                      const sign =
+                        delta > 0
+                          ? "text-[var(--color-success)]"
+                          : delta < 0
+                            ? "text-destructive"
+                            : "text-muted-foreground";
+                      return (
+                        <li
+                          key={s.id}
+                          className="flex items-center justify-between gap-3 py-2 text-xs"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11px] font-medium">
+                              {formatDateFR(toDate(s.date))}
+                            </div>
+                            {prev && (
+                              <div className={`numeric text-[10px] tabular-nums ${sign}`}>
+                                {formatEUR(delta, { signed: true })}
+                              </div>
+                            )}
+                          </div>
+                          <div className="numeric shrink-0 text-sm font-medium tabular-nums">
+                            {formatEUR(s.value)}
+                          </div>
+                          <DeleteHistoryButton
+                            id={s.id}
+                            accountId={acc.id}
+                            date={toDate(s.date).toISOString()}
+                            value={s.value}
+                          />
+                        </li>
+                      );
+                    })}
+                </ul>
               </div>
             )}
           </Panel>
@@ -265,13 +313,14 @@ export default async function AccountDetailPage({
 
         {holdings.length > 0 && (
           <section className="rounded-xl border border-border bg-card">
-            <div className="border-b border-border px-5 py-3">
+            <div className="border-b border-border px-4 py-3 md:px-5">
               <h2 className="text-base font-semibold">ETF du wallet</h2>
               <p className="text-xs text-muted-foreground">
                 Allocation et valeurs estimées sur {formatEUR(current)}.
               </p>
             </div>
-            <table className="w-full text-sm">
+            {/* Desktop table */}
+            <table className="hidden w-full text-sm md:table">
               <thead>
                 <tr className="border-b border-border bg-muted/30 text-[10px] uppercase tracking-wider text-muted-foreground">
                   <th className="px-5 py-2 text-left font-medium">Ticker / ISIN</th>
@@ -297,8 +346,10 @@ export default async function AccountDetailPage({
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {h.name ?? "—"}
                       </td>
-                      <td className="numeric px-3 py-2 text-right">{pct.toFixed(1)} %</td>
-                      <td className="numeric px-5 py-2 text-right font-medium">
+                      <td className="numeric px-3 py-2 text-right tabular-nums">
+                        {pct.toFixed(1)} %
+                      </td>
+                      <td className="numeric px-5 py-2 text-right font-medium tabular-nums">
                         {formatEUR(v)}
                       </td>
                     </tr>
@@ -306,6 +357,39 @@ export default async function AccountDetailPage({
                 })}
               </tbody>
             </table>
+            {/* Mobile: stacked cards */}
+            <ul className="divide-y divide-border md:hidden">
+              {holdings.map((h) => {
+                const pct = h.allocationPct ?? 0;
+                const v = (current * pct) / 100;
+                return (
+                  <li
+                    key={h.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-xs font-medium">{h.ticker}</div>
+                      {h.name && (
+                        <div className="truncate text-[11px] text-muted-foreground">{h.name}</div>
+                      )}
+                      {h.isin && (
+                        <div className="truncate font-mono text-[10px] text-muted-foreground">
+                          {h.isin}
+                        </div>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="numeric text-sm font-semibold tabular-nums">
+                        {formatEUR(v)}
+                      </div>
+                      <div className="numeric text-[11px] tabular-nums text-muted-foreground">
+                        {pct.toFixed(1)} %
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         )}
       </div>
@@ -328,10 +412,18 @@ function Kpi({
 }) {
   const tone = positive ? "text-[var(--color-success)]" : negative ? "text-destructive" : "";
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`numeric mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
+    <div className="rounded-xl border border-border bg-card p-3 md:p-4">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground md:text-[11px]">
+        {label}
+      </div>
+      <div
+        className={`numeric mt-1 text-base font-semibold tabular-nums md:mt-1.5 md:text-lg ${tone}`}
+      >
+        {value}
+      </div>
+      {hint && (
+        <div className="mt-0.5 text-[10px] text-muted-foreground md:text-[11px]">{hint}</div>
+      )}
     </div>
   );
 }

@@ -95,9 +95,9 @@ export default async function AccountsPage() {
         subtitle={`${accounts.length} compte${accounts.length > 1 ? "s" : ""} · tous actifs et passifs`}
         action={<AccountDialog householdId={h.id} members={members} />}
       />
-      <div className="space-y-8 p-8">
+      <div className="space-y-6 p-4 md:space-y-8 md:p-8">
         {orderedKinds.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border bg-card p-12 text-center text-sm text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground md:p-12">
             Aucun compte. Créez-en un pour démarrer.
           </div>
         )}
@@ -106,13 +106,20 @@ export default async function AccountsPage() {
           const subtotal = rows.reduce((s, a) => s + a.currentValue, 0);
           return (
             <section key={kind} className="rounded-xl border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: accountKindColor[kind] }} />
-                  <h2 className="text-sm font-semibold">{accountKindLabel[kind]}</h2>
-                  <Badge variant="secondary" className="ml-2">{rows.length}</Badge>
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-5 md:py-4">
+                <div className="flex min-w-0 items-center gap-2 md:gap-3">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: accountKindColor[kind] }}
+                  />
+                  <h2 className="truncate text-sm font-semibold">{accountKindLabel[kind]}</h2>
+                  <Badge variant="secondary" className="ml-1 shrink-0">
+                    {rows.length}
+                  </Badge>
                 </div>
-                <div className={`numeric text-sm font-semibold ${liabilityKinds.includes(kind) || subtotal < 0 ? "text-destructive" : ""}`}>
+                <div
+                  className={`numeric shrink-0 text-sm font-semibold tabular-nums ${liabilityKinds.includes(kind) || subtotal < 0 ? "text-destructive" : ""}`}
+                >
                   {formatEUR(subtotal)}
                 </div>
               </div>
@@ -143,7 +150,8 @@ export default async function AccountsPage() {
                       inlineHoldings={
                         isBrokerage && holdings.length > 0 ? (
                           <div className="mt-3 rounded-lg border border-border/60 bg-muted/20">
-                            <table className="w-full text-xs">
+                            {/* Desktop: compact table */}
+                            <table className="hidden w-full text-xs md:table">
                               <thead>
                                 <tr className="border-b border-border/60 text-[11px] uppercase tracking-wider text-muted-foreground">
                                   <th className="px-3 py-2 text-left font-medium">Ticker / ISIN</th>
@@ -172,10 +180,10 @@ export default async function AccountsPage() {
                                       <td className="px-3 py-2 text-muted-foreground">
                                         {hold.name ?? "—"}
                                       </td>
-                                      <td className="numeric px-3 py-2 text-right">
+                                      <td className="numeric px-3 py-2 text-right tabular-nums">
                                         {pct.toFixed(1)}%
                                       </td>
-                                      <td className="numeric px-3 py-2 text-right font-medium">
+                                      <td className="numeric px-3 py-2 text-right font-medium tabular-nums">
                                         {formatEUR(v)}
                                       </td>
                                     </tr>
@@ -183,6 +191,38 @@ export default async function AccountsPage() {
                                 })}
                               </tbody>
                             </table>
+                            {/* Mobile: stacked cards, one per holding */}
+                            <ul className="divide-y divide-border/40 md:hidden">
+                              {holdings.map((hold) => {
+                                const pct = hold.allocationPct ?? 0;
+                                const v = (a.currentValue * pct) / 100;
+                                return (
+                                  <li
+                                    key={hold.id}
+                                    className="flex items-center justify-between gap-3 px-3 py-2 text-xs"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate font-mono text-[11px] font-medium">
+                                        {hold.ticker}
+                                      </div>
+                                      {hold.name && (
+                                        <div className="truncate text-[10px] text-muted-foreground">
+                                          {hold.name}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="shrink-0 text-right">
+                                      <div className="numeric text-xs font-medium tabular-nums">
+                                        {formatEUR(v)}
+                                      </div>
+                                      <div className="numeric text-[10px] tabular-nums text-muted-foreground">
+                                        {pct.toFixed(1)}%
+                                      </div>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
                           </div>
                         ) : null
                       }

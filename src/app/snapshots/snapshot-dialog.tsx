@@ -2,7 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2 } from "lucide-react";
@@ -15,6 +23,7 @@ export function SnapshotDialog({ householdId, row, trigger }: { householdId: str
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [form, setForm] = useState<Row>(row ?? { date: new Date().toISOString().slice(0, 10) });
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   function submit() {
     if (!form.date || form.totalAssets == null || form.totalLiabilities == null) {
@@ -35,35 +44,87 @@ export function SnapshotDialog({ householdId, row, trigger }: { householdId: str
 
   function remove() {
     if (!row?.id) return;
-    if (!confirm("Supprimer ce snapshot ?")) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
     start(async () => {
       await removeSnapshot(row.id!);
       toast.success("Supprimé");
       setOpen(false);
+      setConfirmDelete(false);
     });
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={trigger as React.ReactElement ?? <Button size="sm"><Plus className="size-4" /> Snapshot</Button>} />
-      <DialogContent>
-        <DialogHeader><DialogTitle>{row ? "Modifier le snapshot" : "Nouveau snapshot"}</DialogTitle></DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2"><Label>Date</Label><Input type="date" value={form.date ?? ""} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label>Actifs totaux</Label><Input type="number" value={form.totalAssets ?? ""} onChange={(e) => setForm({ ...form, totalAssets: Number(e.target.value) })} /></div>
-            <div className="grid gap-2"><Label>Passifs totaux</Label><Input type="number" value={form.totalLiabilities ?? ""} onChange={(e) => setForm({ ...form, totalLiabilities: Number(e.target.value) })} /></div>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger render={trigger as React.ReactElement ?? <Button size="sm"><Plus className="size-4" /> Snapshot</Button>} />
+      <SheetContent desktopSize="md:max-w-md">
+        <SheetHeader>
+          <SheetTitle>{row ? "Modifier le snapshot" : "Nouveau snapshot"}</SheetTitle>
+        </SheetHeader>
+        <SheetBody className="grid gap-4">
+          <div className="grid gap-2">
+            <Label>Date</Label>
+            <Input
+              type="date"
+              value={form.date ?? ""}
+              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              className="h-11 text-base md:h-8 md:text-sm"
+            />
           </div>
-          <p className="text-xs text-muted-foreground">Utile pour <strong>backfiller</strong> l'historique à des dates antérieures.</p>
-        </div>
-        <DialogFooter className="flex justify-between sm:justify-between">
-          {row?.id ? <Button variant="ghost" size="sm" className="text-destructive" onClick={remove} disabled={pending}><Trash2 className="size-4" /> Supprimer</Button> : <div />}
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Annuler</Button>
-            <Button onClick={submit} disabled={pending}>{row ? "Enregistrer" : "Créer"}</Button>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Actifs totaux</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
+                  value={form.totalAssets ?? ""}
+                  onChange={(e) => setForm({ ...form, totalAssets: Number(e.target.value) })}
+                  className="h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Passifs totaux</Label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
+                  value={form.totalLiabilities ?? ""}
+                  onChange={(e) => setForm({ ...form, totalLiabilities: Number(e.target.value) })}
+                  className="h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm"
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+              </div>
+            </div>
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <p className="text-xs text-muted-foreground">Utile pour <strong>backfiller</strong> l&apos;historique à des dates antérieures.</p>
+        </SheetBody>
+        <SheetFooter className="flex items-center justify-between md:justify-between">
+          {row?.id ? (
+            <Button
+              variant={confirmDelete ? "destructive" : "ghost"}
+              size="sm"
+              className={confirmDelete ? "" : "text-destructive"}
+              onClick={remove}
+              disabled={pending}
+            >
+              <Trash2 className="size-4" />
+              {confirmDelete ? "Confirmer ?" : "Supprimer"}
+            </Button>
+          ) : <span />}
+          <div className="flex flex-1 justify-end gap-2 md:flex-none">
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending} className="flex-1 md:flex-none">Annuler</Button>
+            <Button onClick={submit} disabled={pending} className="flex-1 md:flex-none">{row ? "Enregistrer" : "Créer"}</Button>
+          </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

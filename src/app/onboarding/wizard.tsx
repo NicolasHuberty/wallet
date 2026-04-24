@@ -20,6 +20,7 @@ import {
   Plus,
   Trash2,
   ArrowRight,
+  ArrowLeft,
   Sparkles,
   Check,
   Coins,
@@ -49,6 +50,15 @@ const STARTER_ACCOUNTS: { kind: AccountKind; name: string; suggestedValue: numbe
   { kind: "loan", name: "Prêt hypothécaire", suggestedValue: -180_000 },
 ];
 
+const STEP_LABELS: Record<1 | 2 | 3, string> = {
+  1: "Comptes",
+  2: "Revenus",
+  3: "Récapitulatif",
+};
+
+const moneyInput = "h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm";
+const textInput = "h-11 text-base md:h-8 md:text-sm";
+
 export function OnboardingWizard({ householdName }: { householdName: string }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -57,7 +67,6 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
   const [pending, start] = useTransition();
 
   function addStarter(preset: (typeof STARTER_ACCOUNTS)[number]) {
-    // Avoid duplicates
     if (accounts.some((a) => a.kind === preset.kind && a.name === preset.name)) return;
     setAccounts((prev) => [
       ...prev,
@@ -149,27 +158,71 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
     .reduce((s, a) => s + Math.abs(Number(a.currentValue || 0)), 0);
   const totalIncome = incomes.reduce((s, i) => s + Number(i.amount || 0), 0);
 
+  const progressPct = (step / 3) * 100;
+
   return (
-    <div className="min-h-screen bg-background py-10">
-      <div className="mx-auto max-w-3xl px-6">
+    <div className="min-h-screen bg-background pb-[max(env(safe-area-inset-bottom,0px),1.5rem)] pt-[max(env(safe-area-inset-top,0px),1rem)] md:py-10">
+      <div className="mx-auto max-w-3xl px-4 md:px-6">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-3">
+        <div className="mb-6 flex items-center gap-3 md:mb-8">
           <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Coins className="size-5" strokeWidth={2} />
           </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+          <div className="min-w-0">
+            <div className="truncate text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
               Bienvenue, {householdName}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Mettons en place ton wallet</h1>
+            <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Mettons en place ton wallet</h1>
           </div>
         </div>
 
-        {/* Stepper */}
-        <div className="mb-8 grid grid-cols-3 gap-2">
-          <StepPill n={1} current={step} label="Comptes" />
-          <StepPill n={2} current={step} label="Revenus" />
-          <StepPill n={3} current={step} label="Récapitulatif" />
+        {/* Progress bar (always thin) */}
+        <div className="mb-6 space-y-2 md:mb-8">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-foreground">
+              Étape {step} / 3
+              <span className="ml-1.5 font-normal text-muted-foreground">· {STEP_LABELS[step]}</span>
+            </span>
+            <span className="tabular-nums text-muted-foreground">{Math.round(progressPct)}%</span>
+          </div>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-[var(--chart-1)] transition-all duration-300"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          {/* Desktop-only step pills for richer context */}
+          <div className="hidden grid-cols-3 gap-2 md:grid">
+            {[1, 2, 3].map((n) => {
+              const active = n === step;
+              const done = n < step;
+              return (
+                <div
+                  key={n}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${
+                    active
+                      ? "border-foreground bg-foreground text-background"
+                      : done
+                        ? "border-[var(--color-success)] text-[var(--color-success)]"
+                        : "border-border text-muted-foreground"
+                  }`}
+                >
+                  <span
+                    className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
+                      active
+                        ? "bg-background text-foreground"
+                        : done
+                          ? "bg-[var(--color-success)] text-background"
+                          : "bg-muted"
+                    }`}
+                  >
+                    {done ? <Check className="size-3" /> : n}
+                  </span>
+                  <span className="truncate font-medium">{STEP_LABELS[n as 1 | 2 | 3]}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Step 1: accounts */}
@@ -195,7 +248,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                     key={`${s.kind}-${s.name}`}
                     type="button"
                     onClick={() => addStarter(s)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium hover:border-[var(--chart-1)] hover:text-[var(--chart-1)]"
+                    className="inline-flex min-h-[2.5rem] items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:border-[var(--chart-1)] hover:text-[var(--chart-1)] md:min-h-0 md:px-2.5 md:py-1 md:text-xs"
                   >
                     <span
                       className="size-2 rounded-full"
@@ -207,7 +260,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                 <button
                   type="button"
                   onClick={addBlank}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+                  className="inline-flex min-h-[2.5rem] items-center gap-1.5 rounded-md border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground md:min-h-0 md:px-2.5 md:py-1 md:text-xs"
                 >
                   <Plus className="size-3.5" /> compte vierge
                 </button>
@@ -239,10 +292,10 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="size-7 text-destructive hover:text-destructive"
+                        className="size-9 text-destructive hover:text-destructive md:size-7"
                         onClick={() => removeAccount(i)}
                       >
-                        <Trash2 className="size-3.5" />
+                        <Trash2 className="size-4 md:size-3.5" />
                       </Button>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
@@ -252,6 +305,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                           value={a.name}
                           onChange={(e) => updateAccount(i, "name", e.target.value)}
                           placeholder="ex. Épargne ING"
+                          className={textInput}
                         />
                       </div>
                       <div className="grid gap-1.5">
@@ -260,6 +314,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                           value={a.institution}
                           onChange={(e) => updateAccount(i, "institution", e.target.value)}
                           placeholder="optionnel"
+                          className={textInput}
                         />
                       </div>
                       <div className="grid gap-1.5">
@@ -268,7 +323,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                           value={a.kind}
                           onValueChange={(v) => updateAccount(i, "kind", v as AccountKind)}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger className="h-11 md:h-8">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -287,16 +342,18 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                         <div className="relative">
                           <Input
                             type="number"
+                            inputMode="decimal"
+                            pattern="[0-9\-]*[.,]?[0-9]*"
                             step="0.01"
                             value={a.currentValue}
                             onChange={(e) =>
                               updateAccount(
                                 i,
                                 "currentValue",
-                                e.target.value === "" ? 0 : Number(e.target.value)
+                                e.target.value === "" ? 0 : Number(e.target.value),
                               )
                             }
-                            className="pr-8 text-right numeric"
+                            className={moneyInput}
                           />
                           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
                             €
@@ -318,16 +375,18 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                               <Input
                                 type="number"
                                 step="0.1"
+                                inputMode="decimal"
+                                pattern="[0-9]*[.,]?[0-9]*"
                                 placeholder="ex. 2.5 ou 7"
                                 value={a.annualYieldPct}
                                 onChange={(e) =>
                                   updateAccount(
                                     i,
                                     "annualYieldPct",
-                                    e.target.value === "" ? "" : Number(e.target.value)
+                                    e.target.value === "" ? "" : Number(e.target.value),
                                   )
                                 }
-                                className="pr-8 text-right numeric"
+                                className="h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm"
                               />
                               <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
                                 %
@@ -342,16 +401,18 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                               <Input
                                 type="number"
                                 step="1"
+                                inputMode="decimal"
+                                pattern="[0-9]*[.,]?[0-9]*"
                                 placeholder="ex. 300"
                                 value={a.monthlyContribution}
                                 onChange={(e) =>
                                   updateAccount(
                                     i,
                                     "monthlyContribution",
-                                    e.target.value === "" ? "" : Number(e.target.value)
+                                    e.target.value === "" ? "" : Number(e.target.value),
                                   )
                                 }
-                                className="pr-8 text-right numeric"
+                                className={moneyInput}
                               />
                               <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
                                 €
@@ -366,12 +427,18 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {accounts.length} compte{accounts.length > 1 ? "s" : ""} ·{" "}
-                {formatEUR(totalAssets)} actifs · {formatEUR(totalLiab)} passifs
-              </span>
-              <Button disabled={!canNext() || pending} onClick={() => setStep(2)}>
+            <div className="text-xs text-muted-foreground">
+              {accounts.length} compte{accounts.length > 1 ? "s" : ""} ·{" "}
+              {formatEUR(totalAssets)} actifs · {formatEUR(totalLiab)} passifs
+            </div>
+
+            {/* Sticky / stacked navigation on mobile */}
+            <div className="sticky bottom-[max(env(safe-area-inset-bottom,0px),0.75rem)] z-10 -mx-4 flex flex-col gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:flex-row md:justify-end md:border-none md:bg-transparent md:p-0 md:backdrop-blur-none">
+              <Button
+                disabled={!canNext() || pending}
+                onClick={() => setStep(2)}
+                className="w-full md:w-auto"
+              >
                 Continuer <ArrowRight className="size-4" />
               </Button>
             </div>
@@ -392,60 +459,66 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
 
             <div className="space-y-3">
               {incomes.map((i, idx) => (
-                <div key={idx} className="grid grid-cols-12 items-end gap-3">
-                  <div className="col-span-7 grid gap-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Libellé</Label>
-                    <Input
-                      value={i.label}
-                      onChange={(e) => updateIncome(idx, "label", e.target.value)}
-                      placeholder="Salaire, allocations, loyer perçu…"
-                    />
-                  </div>
-                  <div className="col-span-4 grid gap-1.5">
-                    <Label className="text-[11px] text-muted-foreground">Montant / mois</Label>
-                    <div className="relative">
+                <div key={idx} className="rounded-lg border border-border bg-card p-3 md:border-none md:bg-transparent md:p-0">
+                  <div className="grid grid-cols-12 items-end gap-3">
+                    <div className="col-span-12 grid gap-1.5 md:col-span-7">
+                      <Label className="text-[11px] text-muted-foreground">Libellé</Label>
                       <Input
-                        type="number"
-                        step="0.01"
-                        value={i.amount}
-                        onChange={(e) =>
-                          updateIncome(
-                            idx,
-                            "amount",
-                            e.target.value === "" ? "" : Number(e.target.value)
-                          )
-                        }
-                        className="pr-8 text-right numeric"
+                        value={i.label}
+                        onChange={(e) => updateIncome(idx, "label", e.target.value)}
+                        placeholder="Salaire, allocations, loyer perçu…"
+                        className={textInput}
                       />
-                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
-                        €
-                      </span>
                     </div>
+                    <div className="col-span-10 grid gap-1.5 md:col-span-4">
+                      <Label className="text-[11px] text-muted-foreground">Montant / mois</Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          inputMode="decimal"
+                          pattern="[0-9]*[.,]?[0-9]*"
+                          value={i.amount}
+                          onChange={(e) =>
+                            updateIncome(
+                              idx,
+                              "amount",
+                              e.target.value === "" ? "" : Number(e.target.value),
+                            )
+                          }
+                          className={moneyInput}
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
+                          €
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="col-span-2 size-11 text-destructive hover:text-destructive md:col-span-1 md:size-9"
+                      onClick={() => removeIncome(idx)}
+                      disabled={incomes.length === 1}
+                    >
+                      <Trash2 className="size-4 md:size-3.5" />
+                    </Button>
                   </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="col-span-1 size-9 text-destructive hover:text-destructive"
-                    onClick={() => removeIncome(idx)}
-                    disabled={incomes.length === 1}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={addIncome}>
+              <Button variant="outline" size="sm" onClick={addIncome} className="h-11 w-full md:h-8 md:w-auto">
                 <Plus className="size-3.5" /> Ajouter un revenu
               </Button>
             </div>
 
-            <div className="flex items-center justify-between">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                ← Retour
+            <div className="text-xs text-muted-foreground">
+              Total : {formatEUR(totalIncome)}/mois
+            </div>
+
+            <div className="sticky bottom-[max(env(safe-area-inset-bottom,0px),0.75rem)] z-10 -mx-4 flex flex-col gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:flex-row md:items-center md:justify-between md:border-none md:bg-transparent md:p-0 md:backdrop-blur-none">
+              <Button variant="outline" onClick={() => setStep(1)} className="w-full md:w-auto">
+                <ArrowLeft className="size-4" /> Retour
               </Button>
-              <div className="text-xs text-muted-foreground">
-                Total : {formatEUR(totalIncome)}/mois
-              </div>
-              <Button onClick={() => setStep(3)}>
+              <Button onClick={() => setStep(3)} className="w-full md:w-auto">
                 Continuer <ArrowRight className="size-4" />
               </Button>
             </div>
@@ -469,7 +542,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
               <Stat label="Net" value={formatEUR(totalAssets - totalLiab)} />
             </div>
 
-            <div className="rounded-lg border border-border bg-card divide-y divide-border">
+            <div className="divide-y divide-border rounded-lg border border-border bg-card">
               {accounts.map((a, i) => (
                 <div key={i} className="flex items-center justify-between px-4 py-2 text-sm">
                   <div className="flex items-center gap-2">
@@ -516,11 +589,11 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
                 ))}
             </div>
 
-            <div className="flex items-center justify-between">
-              <Button variant="outline" onClick={() => setStep(2)}>
-                ← Retour
+            <div className="sticky bottom-[max(env(safe-area-inset-bottom,0px),0.75rem)] z-10 -mx-4 flex flex-col gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:flex-row md:items-center md:justify-between md:border-none md:bg-transparent md:p-0 md:backdrop-blur-none">
+              <Button variant="outline" onClick={() => setStep(2)} className="w-full md:w-auto">
+                <ArrowLeft className="size-4" /> Retour
               </Button>
-              <Button onClick={finish} disabled={pending}>
+              <Button onClick={finish} disabled={pending} className="w-full md:w-auto">
                 <Check className="size-4" />
                 {pending ? "Création…" : "Terminer et ouvrir le dashboard"}
               </Button>
@@ -539,35 +612,6 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function StepPill({ n, current, label }: { n: 1 | 2 | 3; current: number; label: string }) {
-  const active = n === current;
-  const done = n < current;
-  return (
-    <div
-      className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs ${
-        active
-          ? "border-foreground bg-foreground text-background"
-          : done
-            ? "border-[var(--color-success)] text-[var(--color-success)]"
-            : "border-border text-muted-foreground"
-      }`}
-    >
-      <span
-        className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
-          active
-            ? "bg-background text-foreground"
-            : done
-              ? "bg-[var(--color-success)] text-background"
-              : "bg-muted"
-        }`}
-      >
-        {done ? <Check className="size-3" /> : n}
-      </span>
-      <span className="truncate font-medium">{label}</span>
     </div>
   );
 }

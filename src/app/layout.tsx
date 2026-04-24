@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import { SidebarNav, SidebarBrand } from "@/components/sidebar-nav";
 import { HouseholdSummary } from "@/components/household-summary";
+import { MobileNav } from "@/components/mobile-nav";
 import { Toaster } from "@/components/ui/sonner";
 import { auth } from "@/lib/auth";
 import { DEMO_MODE } from "@/lib/demo";
@@ -29,6 +30,14 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+  // Avoid iOS Safari auto-zooming on input focus; inputs themselves set >=16px font.
+  maximumScale: 1,
+};
+
 export default async function RootLayout({
   children,
 }: {
@@ -47,7 +56,8 @@ export default async function RootLayout({
     >
       <body className="min-h-full bg-background text-foreground">
         {authed ? (
-          <div className="flex min-h-screen">
+          <div className="flex min-h-screen md:min-h-screen">
+            {/* Desktop sidebar — unchanged above md */}
             <aside className="hidden w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
               <SidebarBrand />
               <SidebarNav />
@@ -55,8 +65,18 @@ export default async function RootLayout({
                 <HouseholdSummary />
               </div>
             </aside>
-            <main className="flex-1 overflow-x-hidden">
+
+            {/* Main column.
+             *  - On mobile the top bar is sticky and the bottom nav is fixed,
+             *    so the scrollable content needs padding-bottom to clear it.
+             *  - On desktop nothing changes — the sidebar flanks the content. */}
+            <main className="relative flex-1 overflow-x-hidden pb-safe-offset md:pb-0">
               {DEMO_MODE && <DemoBanner />}
+              {/* Mobile top bar + bottom tab bar (md:hidden) */}
+              <MobileNav
+                summary={<HouseholdSummary variant="sheet" />}
+                showDemoOffset={DEMO_MODE}
+              />
               {children}
             </main>
           </div>

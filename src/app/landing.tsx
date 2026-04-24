@@ -134,7 +134,7 @@ export function Landing() {
       `}</style>
 
       {/* ──────────────────── Top bar ──────────────────── */}
-      <header className="fade-in d1 flex items-center justify-between px-6 py-5 md:px-12">
+      <header className="fade-in d1 flex items-center justify-between px-5 py-4 md:px-12 md:py-5">
         <div className="flex items-center gap-3">
           <div
             className="flex size-8 items-center justify-center rounded-[3px]"
@@ -142,11 +142,12 @@ export function Landing() {
           >
             <span className="mono text-[15px] font-semibold">W</span>
           </div>
-          <span className="mono text-[11px] uppercase tracking-[0.28em] text-[var(--ink-soft)]">
+          <span className="mono hidden text-[11px] uppercase tracking-[0.28em] text-[var(--ink-soft)] sm:inline">
             Wallet · ledger
           </span>
+          <span className="serif text-[17px] sm:hidden">Wallet</span>
         </div>
-        <nav className="flex items-center gap-6 text-sm">
+        <nav className="flex items-center gap-4 text-sm sm:gap-6">
           <a
             href="https://github.com/NicolasHuberty/wallet"
             target="_blank"
@@ -161,70 +162,72 @@ export function Landing() {
           >
             Log in
           </Link>
-          <Link href="/signup" className="serif-italic text-[15px] text-[var(--rust)] underline underline-offset-4 hover:text-[var(--moss-deep)]">
+          <Link href="/signup" className="serif-italic hidden text-[15px] text-[var(--rust)] underline underline-offset-4 hover:text-[var(--moss-deep)] sm:inline-block">
             Créer un compte →
           </Link>
         </nav>
       </header>
 
       {/* ──────────────────── Hero ──────────────────── */}
-      <section className="relative px-6 pb-24 pt-14 md:px-12 md:pb-40 md:pt-24">
+      <section className="relative px-5 pb-20 pt-8 md:px-12 md:pb-40 md:pt-24">
         <div className="mx-auto max-w-6xl">
           {/* Eyebrow */}
-          <div className="fade-in d2 mb-10 flex items-center gap-3">
-            <span className="block h-px w-10" style={{ background: "var(--ink)" }} />
-            <span className="mono text-[10px] uppercase tracking-[0.35em] text-[var(--ink-soft)]">
+          <div className="fade-in d2 mb-6 flex items-center gap-3 md:mb-10">
+            <span className="block h-px w-8 md:w-10" style={{ background: "var(--ink)" }} />
+            <span className="mono text-[9px] uppercase tracking-[0.3em] text-[var(--ink-soft)] md:text-[10px] md:tracking-[0.35em]">
               Open source · self-hosted · MIT
             </span>
           </div>
 
-          <h1 className="fade-in d3 serif-display max-w-[18ch] text-[clamp(3.5rem,12vw,11rem)]">
+          <h1 className="fade-in d3 serif-display max-w-[18ch] text-[clamp(3rem,13vw,11rem)]">
             Personal finance,
             <br />
             <span className="serif-italic" style={{ color: "var(--moss-deep)" }}>
               on your own
             </span>{" "}
-            <span className="underline decoration-[var(--rust)] decoration-[6px] underline-offset-[0.1em]">
+            <span className="underline decoration-[var(--rust)] decoration-[5px] underline-offset-[0.1em] md:decoration-[6px]">
               books
             </span>
             .
           </h1>
 
-          <div className="mt-12 grid gap-10 md:grid-cols-12">
-            <p className="fade-in d4 md:col-span-6 text-[17px] leading-[1.55] text-[var(--ink-soft)]">
+          <div className="mt-8 grid gap-8 md:mt-12 md:grid-cols-12 md:gap-10">
+            <p className="fade-in d4 text-[15px] leading-[1.55] text-[var(--ink-soft)] md:col-span-6 md:text-[17px]">
               <span className="font-medium text-[var(--ink)]">Wallet</span> est un suivi de
               patrimoine <span className="serif-italic">self-hosted</span> : accounts, épargne,
               DCA, crédits, immobilier. Un seul formulaire mensuel, une base Postgres sous votre
-              contrôle, et des graphes qui racontent ce qui se passe vraiment. <br />
-              <br />
-              Pas de cloud tiers, pas d'analytics, pas de <span className="serif-italic">« freemium »</span>.
+              contrôle, et des graphes qui racontent ce qui se passe vraiment. <br className="hidden md:inline" />
+              <span className="md:block md:mt-4"> Pas de cloud tiers, pas d&apos;analytics, pas de <span className="serif-italic">« freemium »</span>.</span>
             </p>
 
-            <div className="fade-in d5 md:col-span-6 md:pl-8 md:border-l md:border-[var(--hairline)]">
-              <div className="flex flex-wrap items-center gap-3">
+            <div className="fade-in d5 md:col-span-6 md:border-l md:border-[var(--hairline)] md:pl-8">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <Link
+                  href="/signup"
+                  className="btn-primary w-full justify-center text-[15px] sm:w-auto sm:justify-start"
+                >
+                  Créer mon compte <ArrowUpRight className="size-4" />
+                </Link>
                 <a
                   href="https://demo.wallet.huberty.pro"
                   target="_blank"
                   rel="noreferrer"
-                  className="btn-primary text-[14px]"
+                  className="btn-ghost w-full justify-center text-[14px] sm:w-auto sm:justify-start"
                 >
                   <Eye className="size-4" /> Try the demo
                 </a>
-                <Link href="/signup" className="btn-ghost text-[14px]">
-                  Créer mon compte <ArrowUpRight className="size-4" />
-                </Link>
                 <a
                   href="https://github.com/NicolasHuberty/wallet"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-4"
+                  className="inline-flex items-center justify-center gap-1.5 text-[13px] text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-4 sm:justify-start"
                 >
                   <Star className="size-3.5" /> Star on GitHub
                 </a>
               </div>
-              <div className="mono mt-6 inline-flex items-center gap-2 rounded-[2px] border border-[var(--hairline)] bg-[var(--cream-deep)] px-3 py-2 text-[11px] text-[var(--ink-soft)]">
-                <span className="text-[var(--moss-deep)]">$</span> git clone
-                github.com/NicolasHuberty/wallet
+              <div className="mono mt-6 inline-flex max-w-full items-center gap-2 overflow-hidden rounded-[2px] border border-[var(--hairline)] bg-[var(--cream-deep)] px-3 py-2 text-[11px] text-[var(--ink-soft)]">
+                <span className="shrink-0 text-[var(--moss-deep)]">$</span>{" "}
+                <span className="truncate">git clone github.com/NicolasHuberty/wallet</span>
               </div>
             </div>
           </div>
@@ -242,7 +245,7 @@ export function Landing() {
 
       {/* ──────────────────── Ticker/stat bar ──────────────────── */}
       <div
-        className="rule-heavy rule fade-in d6 overflow-hidden border-y py-6"
+        className="rule-heavy rule fade-in d6 overflow-hidden border-y py-4 md:py-6"
         style={{ borderColor: "var(--ink)", background: "var(--cream-deep)" }}
       >
         <div className="ticker-track mono text-[13px] uppercase tracking-[0.2em]">
@@ -272,8 +275,8 @@ export function Landing() {
       </div>
 
       {/* ──────────────────── Features — ledger style ──────────────────── */}
-      <section className="mx-auto max-w-6xl px-6 py-24 md:px-12 md:py-32">
-        <div className="mb-14 flex items-baseline justify-between">
+      <section className="mx-auto max-w-6xl px-5 py-16 md:px-12 md:py-32">
+        <div className="mb-10 flex items-baseline justify-between md:mb-14">
           <h2 className="serif-display text-[clamp(2rem,5vw,3.75rem)]">
             <span style={{ color: "var(--stone)" }}>§ </span>
             Trois entrées,
@@ -291,18 +294,18 @@ export function Landing() {
           {FEATURES.map((f, i) => (
             <article
               key={f.title}
-              className="ledger-card group p-8 transition-colors md:p-10"
+              className="ledger-card group p-6 transition-colors sm:p-8 md:p-10"
               style={{ background: "var(--cream-deep)" }}
             >
-              <div className="mono mb-8 flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-[var(--stone)]">
+              <div className="mono mb-6 flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-[var(--stone)] md:mb-8">
                 <span>Entry</span>
                 <span className="row-num">{String(i + 1).padStart(2, "0")} / 03</span>
               </div>
-              <h3 className="serif text-[clamp(1.5rem,3vw,2rem)] font-medium leading-[1.05]">
+              <h3 className="serif text-[clamp(1.375rem,3vw,2rem)] font-medium leading-[1.05]">
                 {f.title}
               </h3>
               <p className="mt-4 text-[14px] leading-[1.6] text-[var(--ink-soft)]">{f.body}</p>
-              <div className="mt-8 flex flex-wrap gap-2">
+              <div className="mt-6 flex flex-wrap gap-2 md:mt-8">
                 {f.tags.map((t) => (
                   <span
                     key={t}
@@ -318,8 +321,8 @@ export function Landing() {
       </section>
 
       {/* ──────────────────── Preview / ledger mock ──────────────────── */}
-      <section className="mx-auto max-w-6xl px-6 pb-28 md:px-12 md:pb-40">
-        <div className="mb-10 flex items-baseline justify-between">
+      <section className="mx-auto max-w-6xl px-5 pb-20 md:px-12 md:pb-40">
+        <div className="mb-8 flex items-baseline justify-between md:mb-10">
           <h2 className="serif-display text-[clamp(2rem,5vw,3.5rem)]">
             Une <span className="serif-italic" style={{ color: "var(--rust)" }}>page</span>,
             <br /> tout le mois.
@@ -329,14 +332,14 @@ export function Landing() {
           </span>
         </div>
 
-        <div className="border border-[var(--ink)] shadow-[8px_8px_0_var(--moss-deep)]">
+        <div className="border border-[var(--ink)] shadow-[4px_4px_0_var(--moss-deep)] md:shadow-[8px_8px_0_var(--moss-deep)]">
           {/* Ledger header */}
           <div
-            className="mono flex items-center justify-between border-b border-[var(--ink)] px-4 py-2 text-[10px] uppercase tracking-[0.25em] md:px-8"
+            className="mono flex items-center justify-between border-b border-[var(--ink)] px-3 py-2 text-[9px] uppercase tracking-[0.2em] md:px-8 md:text-[10px] md:tracking-[0.25em]"
             style={{ background: "var(--ink)", color: "var(--cream)" }}
           >
-            <span>Wallet / Check-in · March 2026</span>
-            <span>Folio № 03</span>
+            <span className="truncate">Wallet / Check-in · March 2026</span>
+            <span className="shrink-0">Folio № 03</span>
           </div>
 
           {/* Ledger rows */}
@@ -397,7 +400,7 @@ export function Landing() {
 
       {/* ──────────────────── Self-host pitch ──────────────────── */}
       <section
-        className="relative overflow-hidden border-y-2 px-6 py-24 md:px-12 md:py-32"
+        className="relative overflow-hidden border-y-2 px-5 py-16 md:px-12 md:py-32"
         style={{ borderColor: "var(--ink)", background: "var(--moss-deep)", color: "var(--cream)" }}
       >
         <div className="mx-auto grid max-w-6xl gap-12 md:grid-cols-12 md:items-center">
@@ -460,7 +463,7 @@ export function Landing() {
       </section>
 
       {/* ──────────────────── Footer ──────────────────── */}
-      <footer className="mx-auto max-w-6xl px-6 py-12 md:px-12">
+      <footer className="mx-auto max-w-6xl px-5 py-10 md:px-12 md:py-12">
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="serif text-[22px] leading-none">

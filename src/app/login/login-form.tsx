@@ -2,7 +2,6 @@
 
 import { use, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +15,6 @@ export function LoginForm({
   searchParams: Promise<{ from?: string; error?: string }>;
 }) {
   const { from } = use(searchParams);
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, start] = useTransition();
@@ -58,67 +56,90 @@ export function LoginForm({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <div className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Coins className="size-5" strokeWidth={2} />
+    <div className="flex min-h-[100dvh] flex-col bg-background">
+      {/* Hero / branding — generous on mobile, centered on desktop */}
+      <div className="flex flex-1 items-start justify-center px-4 pt-12 pb-6 sm:items-center sm:p-6">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 flex flex-col items-center gap-3 text-center">
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+              <Coins className="size-6" strokeWidth={2} />
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Bon retour</h1>
+            <p className="text-sm text-muted-foreground">
+              Connecte-toi pour retrouver ton patrimoine.
+            </p>
           </div>
-          <h1 className="text-xl font-semibold">Wallet</h1>
-          <p className="text-xs text-muted-foreground">Suivi de patrimoine privé</p>
-        </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogle}
-          disabled={pending}
-        >
-          <GoogleIcon /> Continuer avec Google
-        </Button>
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-6">
+            {/* Google button — visually distinct (outline + icon + larger) */}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-center gap-3 text-[15px] font-medium"
+              onClick={handleGoogle}
+              disabled={pending}
+            >
+              <GoogleIcon /> Continuer avec Google
+            </Button>
 
-        <div className="my-4 flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-          <div className="h-px flex-1 bg-border" />
-          ou
-          <div className="h-px flex-1 bg-border" />
-        </div>
+            <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <div className="h-px flex-1 bg-border" />
+              ou avec email
+              <div className="h-px flex-1 bg-border" />
+            </div>
 
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Email</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="toi@example.com"
-              autoComplete="email"
-            />
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="email" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="toi@example.com"
+                  autoComplete="email"
+                  className="h-12 text-base md:text-base"
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="password" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  Mot de passe
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="h-12 text-base md:text-base"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleEmail();
+                  }}
+                />
+              </div>
+              <Button
+                onClick={handleEmail}
+                disabled={pending}
+                className="h-12 w-full text-[15px] font-semibold"
+              >
+                {pending ? "…" : "Se connecter"}
+              </Button>
+            </div>
           </div>
-          <div className="grid gap-1.5">
-            <Label>Mot de passe</Label>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleEmail();
-              }}
-            />
-          </div>
-          <Button onClick={handleEmail} disabled={pending}>
-            {pending ? "…" : "Se connecter"}
-          </Button>
-        </div>
 
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          Pas encore de compte ?{" "}
-          <Link href="/signup" className="text-foreground hover:underline">
-            Créer un compte
-          </Link>
-        </p>
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Pas encore de compte ?{" "}
+            <Link href="/signup" className="font-medium text-foreground underline underline-offset-4">
+              Créer un compte
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -126,7 +147,7 @@ export function LoginForm({
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+    <svg viewBox="0 0 24 24" className="size-5" aria-hidden>
       <path
         fill="#4285F4"
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"

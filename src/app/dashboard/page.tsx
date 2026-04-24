@@ -127,9 +127,9 @@ export default async function DashboardPage() {
           </div>
         }
       />
-      <div className="space-y-8 p-8">
-        {/* Top KPI band */}
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="space-y-6 p-4 md:space-y-8 md:p-8">
+        {/* Top KPI band — 2×N on mobile, 6 cols on desktop. */}
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-6">
           <KpiCard label="Net worth" value={nw.netWorth} delta={delta12} deltaLabel="12 mois" />
           <KpiCard
             label="Actifs"
@@ -163,7 +163,7 @@ export default async function DashboardPage() {
         </section>
 
         {/* Cashflow strip */}
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
           <MiniStatCard
             label="Revenus récurrents"
             value={formatEUR(cashflow.totalIncome)}
@@ -190,11 +190,11 @@ export default async function DashboardPage() {
 
         {/* Net worth chart + allocation */}
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="rounded-xl border border-border bg-card p-5 lg:col-span-2">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
+          <div className="rounded-xl border border-border bg-card p-4 md:p-5 lg:col-span-2">
+            <div className="mb-3 flex items-start justify-between gap-3 md:mb-4 md:items-center">
+              <div className="min-w-0">
                 <h2 className="text-base font-semibold">Évolution du patrimoine net</h2>
-                <p className="text-xs text-muted-foreground">
+                <p className="truncate text-xs text-muted-foreground">
                   {snapshots.length} snapshot{snapshots.length > 1 ? "s" : ""} ·{" "}
                   {snapshots.length > 0
                     ? `depuis ${formatDateFR((snapshots[0].date as unknown as Date).toISOString())}`
@@ -203,21 +203,21 @@ export default async function DashboardPage() {
               </div>
               <Link
                 href="/snapshots"
-                className="text-xs text-muted-foreground hover:text-foreground"
+                className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
               >
-                Historique complet →
+                Historique →
               </Link>
             </div>
             {snapshots.length > 0 ? (
               <NetWorthChart data={chartData} />
             ) : (
-              <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+              <div className="flex h-48 items-center justify-center text-sm text-muted-foreground md:h-72">
                 Aucune donnée.
               </div>
             )}
           </div>
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-4 text-base font-semibold">Répartition des actifs</h2>
+          <div className="rounded-xl border border-border bg-card p-4 md:p-5">
+            <h2 className="mb-3 text-base font-semibold md:mb-4">Répartition des actifs</h2>
             {allocation.length > 0 ? (
               <AllocationDonut data={allocation} />
             ) : (
@@ -255,7 +255,7 @@ export default async function DashboardPage() {
                     {formatEUR(subtotal)}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {rows.map((a) => (
                     <AccountCard
                       key={a.id}
@@ -297,7 +297,7 @@ export default async function DashboardPage() {
                         {formatEUR(subtotal)}
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                       {rows.map((a) => (
                         <AccountCard
                           key={a.id}
@@ -323,36 +323,39 @@ export default async function DashboardPage() {
         {recentCharges.length > 0 && (
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="rounded-xl border border-border bg-card lg:col-span-2">
-              <div className="flex items-center justify-between border-b border-border px-5 py-3">
-                <div className="flex items-center gap-2">
-                  <Receipt className="size-3.5 text-muted-foreground" />
-                  <h2 className="text-base font-semibold">Derniers frais one-shot</h2>
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Receipt className="size-3.5 shrink-0 text-muted-foreground" />
+                  <h2 className="truncate text-base font-semibold">Derniers frais one-shot</h2>
                 </div>
                 <Link
                   href="/charges"
-                  className="text-xs text-muted-foreground hover:text-foreground"
+                  className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
                 >
                   Voir tout →
                 </Link>
               </div>
               <ul className="divide-y divide-border">
                 {recentCharges.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between px-5 py-3 text-sm">
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm md:px-5"
+                  >
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{c.label}</div>
-                      <div className="text-[11px] text-muted-foreground">
+                      <div className="truncate text-[11px] text-muted-foreground">
                         {formatDateFR((c.date as unknown as Date).toISOString())}
                         {c.notes && <span className="ml-2 italic">· {c.notes}</span>}
                       </div>
                     </div>
-                    <div className="numeric tabular-nums font-medium text-destructive">
+                    <div className="numeric shrink-0 font-medium tabular-nums text-destructive">
                       -{formatEUR(c.amount)}
                     </div>
                   </li>
                 ))}
               </ul>
             </div>
-            <div className="rounded-xl border border-border bg-card p-5">
+            <div className="rounded-xl border border-border bg-card p-4 md:p-5">
               <h2 className="mb-4 text-base font-semibold">Frais one-shot — résumé</h2>
               <div className="space-y-3">
                 <SummaryRow label={`${new Date().getFullYear()}`} value={formatEUR(ytdCharges)} />
@@ -375,12 +378,14 @@ export default async function DashboardPage() {
 
         {/* Empty state if no accounts */}
         {activeAccounts.length === 0 && (
-          <section className="rounded-xl border border-dashed border-border bg-card p-12 text-center text-sm text-muted-foreground">
-            Aucun compte. Crée ton premier sur{" "}
-            <Link href="/accounts" className="text-foreground underline">
-              /accounts
+          <section className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground md:p-12">
+            <p>Aucun compte encore.</p>
+            <Link
+              href="/accounts"
+              className="mt-3 inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Créer mon premier compte
             </Link>
-            .
           </section>
         )}
       </div>
@@ -407,13 +412,21 @@ function MiniStatCard({
         : "";
   const Icon = tone === "positive" ? TrendingUp : tone === "negative" ? TrendingDown : null;
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-        {Icon && <Icon className="size-3" />}
-        {label}
+    <div className="rounded-lg border border-border bg-card p-3 md:p-4">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground md:gap-2 md:text-[11px]">
+        {Icon && <Icon className="size-3 shrink-0" />}
+        <span className="truncate">{label}</span>
       </div>
-      <div className={`numeric mt-1 text-lg font-semibold tabular-nums ${toneClass}`}>{value}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
+      <div
+        className={`numeric mt-1 text-base font-semibold tabular-nums md:text-lg ${toneClass}`}
+      >
+        {value}
+      </div>
+      {hint && (
+        <div className="mt-0.5 truncate text-[10px] text-muted-foreground md:text-[11px]">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

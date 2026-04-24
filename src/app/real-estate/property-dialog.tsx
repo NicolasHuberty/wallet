@@ -2,7 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Pencil, Trash2 } from "lucide-react";
@@ -28,6 +36,7 @@ export function PropertyDialog({ householdId, property, trigger }: { householdId
   const [form, setForm] = useState<PropertyRow>(
     property ?? { annualAppreciationPct: 2, monthlyFees: 0, purchaseDate: new Date().toISOString().slice(0, 10) }
   );
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const update = <K extends keyof PropertyRow>(k: K, v: PropertyRow[K]) => setForm((p) => ({ ...p, [k]: v }));
 
   function submit() {
@@ -55,44 +64,101 @@ export function PropertyDialog({ householdId, property, trigger }: { householdId
 
   function remove() {
     if (!property?.accountId) return;
-    if (!confirm(`Supprimer le bien "${property.name}" ?`)) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
     start(async () => {
       await deleteProperty(property.accountId!);
       toast.success("Supprimé");
       setOpen(false);
+      setConfirmDelete(false);
     });
   }
 
+  const moneyInput = "h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm";
+  const textInput = "h-11 text-base md:h-8 md:text-sm";
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={trigger as React.ReactElement ?? <Button size="sm"><Plus className="size-4" /> Nouveau bien</Button>} />
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>{property ? "Modifier le bien" : "Nouveau bien"}</DialogTitle></DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2"><Label>Nom</Label><Input value={form.name ?? ""} onChange={(e) => update("name", e.target.value)} /></div>
-          <div className="grid gap-2"><Label>Adresse</Label><Input value={form.address ?? ""} onChange={(e) => update("address", e.target.value)} /></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label>Prix d'achat</Label><Input type="number" value={form.purchasePrice ?? ""} onChange={(e) => update("purchasePrice", Number(e.target.value))} /></div>
-            <div className="grid gap-2"><Label>Date d'achat</Label><Input type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} /></div>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger render={trigger as React.ReactElement ?? <Button size="sm"><Plus className="size-4" /> Nouveau bien</Button>} />
+      <SheetContent desktopSize="md:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{property ? "Modifier le bien" : "Nouveau bien"}</SheetTitle>
+        </SheetHeader>
+        <SheetBody className="grid gap-4">
+          <div className="grid gap-2">
+            <Label>Nom</Label>
+            <Input value={form.name ?? ""} onChange={(e) => update("name", e.target.value)} className={textInput} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label>Valeur actuelle</Label><Input type="number" value={form.currentValue ?? ""} onChange={(e) => update("currentValue", Number(e.target.value))} /></div>
-            <div className="grid gap-2"><Label>Appréciation annuelle (%)</Label><Input type="number" step="0.1" value={form.annualAppreciationPct ?? 2} onChange={(e) => update("annualAppreciationPct", Number(e.target.value))} /></div>
+          <div className="grid gap-2">
+            <Label>Adresse</Label>
+            <Input value={form.address ?? ""} onChange={(e) => update("address", e.target.value)} className={textInput} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2"><Label>Frais mensuels</Label><Input type="number" value={form.monthlyFees ?? 0} onChange={(e) => update("monthlyFees", Number(e.target.value))} /></div>
-            <div className="grid gap-2"><Label>Surface (m²)</Label><Input type="number" value={form.surfaceSqm ?? ""} onChange={(e) => update("surfaceSqm", Number(e.target.value))} /></div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Prix d&apos;achat</Label>
+              <div className="relative">
+                <Input type="number" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={form.purchasePrice ?? ""} onChange={(e) => update("purchasePrice", Number(e.target.value))} className={moneyInput} />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Date d&apos;achat</Label>
+              <Input type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} className={textInput} />
+            </div>
           </div>
-        </div>
-        <DialogFooter className="flex justify-between sm:justify-between">
-          {property?.id ? <Button variant="ghost" size="sm" className="text-destructive" onClick={remove} disabled={pending}><Trash2 className="size-4" /> Supprimer</Button> : <div />}
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Annuler</Button>
-            <Button onClick={submit} disabled={pending}>{property ? "Enregistrer" : "Créer"}</Button>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Valeur actuelle</Label>
+              <div className="relative">
+                <Input type="number" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={form.currentValue ?? ""} onChange={(e) => update("currentValue", Number(e.target.value))} className={moneyInput} />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Appréciation annuelle (%)</Label>
+              <div className="relative">
+                <Input type="number" step="0.1" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={form.annualAppreciationPct ?? 2} onChange={(e) => update("annualAppreciationPct", Number(e.target.value))} className="h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm" />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">%</span>
+              </div>
+            </div>
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Frais mensuels</Label>
+              <div className="relative">
+                <Input type="number" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={form.monthlyFees ?? 0} onChange={(e) => update("monthlyFees", Number(e.target.value))} className={moneyInput} />
+                <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Surface (m²)</Label>
+              <Input type="number" inputMode="decimal" pattern="[0-9]*[.,]?[0-9]*" value={form.surfaceSqm ?? ""} onChange={(e) => update("surfaceSqm", Number(e.target.value))} className="h-11 text-right tabular-nums text-base md:h-8 md:text-sm" />
+            </div>
+          </div>
+        </SheetBody>
+        <SheetFooter className="flex items-center justify-between md:justify-between">
+          {property?.id ? (
+            <Button
+              variant={confirmDelete ? "destructive" : "ghost"}
+              size="sm"
+              className={confirmDelete ? "" : "text-destructive"}
+              onClick={remove}
+              disabled={pending}
+            >
+              <Trash2 className="size-4" />
+              {confirmDelete ? "Confirmer ?" : "Supprimer"}
+            </Button>
+          ) : <span />}
+          <div className="flex flex-1 justify-end gap-2 md:flex-none">
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending} className="flex-1 md:flex-none">Annuler</Button>
+            <Button onClick={submit} disabled={pending} className="flex-1 md:flex-none">{property ? "Enregistrer" : "Créer"}</Button>
+          </div>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
 

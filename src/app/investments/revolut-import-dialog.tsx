@@ -3,13 +3,14 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -21,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Upload, FileText, CheckCircle2, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { parseRevolutCsv, type RevolutImportResult } from "@/lib/revolut";
 import { importRevolutHoldings } from "./actions";
 import { formatEUR } from "@/lib/format";
@@ -39,18 +41,25 @@ export function RevolutImportDialog({
   const [accountId, setAccountId] = useState<string | undefined>(defaultAccountId ?? accounts[0]?.id);
   const [csv, setCsv] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
+  const [parsing, setParsing] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const preview: RevolutImportResult | null = useMemo(
     () => (csv ? parseRevolutCsv(csv) : null),
-    [csv]
+    [csv],
   );
 
   async function handleFile(f: File | null) {
     if (!f) return;
     setFileName(f.name);
-    const text = await f.text();
-    setCsv(text);
+    setParsing(true);
+    try {
+      const text = await f.text();
+      setCsv(text);
+    } finally {
+      setTimeout(() => setParsing(false), 200);
+    }
   }
 
   function submit() {
@@ -68,7 +77,7 @@ export function RevolutImportDialog({
         toast.success(
           `Import terminé · ${res.created} ETF créés · ${res.updated} mis à jour${
             res.dividends ? ` · dividendes ${formatEUR(res.dividends)}` : ""
-          }`
+          }`,
         );
         setOpen(false);
         setCsv("");
@@ -80,8 +89,8 @@ export function RevolutImportDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
         render={
           (trigger as React.ReactElement) ?? (
             <Button size="sm" variant="outline">
@@ -90,24 +99,26 @@ export function RevolutImportDialog({
           )
         }
       />
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Importer depuis Revolut</DialogTitle>
-        </DialogHeader>
+      <SheetContent desktopSize="md:max-w-2xl">
+        <SheetHeader>
+          <SheetTitle>Importer depuis Revolut</SheetTitle>
+        </SheetHeader>
 
-        <div className="grid gap-5">
+        <SheetBody className="grid gap-5">
           <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-xs">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
               <FileText className="size-4" /> Comment exporter depuis Revolut
             </div>
             <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-              <li>Ouvre l&apos;app Revolut → onglet <b>Investments</b> (Stocks).</li>
+              <li>
+                Ouvre l&apos;app Revolut → onglet <b>Investments</b> (Stocks).
+              </li>
               <li>
                 Touche <b>Statements</b> (icône document en haut à droite).
               </li>
               <li>
-                Choisis <b>Tax report</b> (ou <b>Account statement</b>) au format <b>CSV</b> pour la
-                période souhaitée.
+                Choisis <b>Tax report</b> (ou <b>Account statement</b>) au format <b>CSV</b> pour
+                la période souhaitée.
               </li>
               <li>Télécharge le fichier reçu par email et dépose-le ci-dessous.</li>
             </ol>
@@ -121,7 +132,7 @@ export function RevolutImportDialog({
           <div className="grid gap-2">
             <Label>Compte de destination</Label>
             <Select value={accountId} onValueChange={(v) => setAccountId(v ?? undefined)}>
-              <SelectTrigger>
+              <SelectTrigger className="h-11 md:h-8">
                 <SelectValue placeholder="Sélectionner un compte" />
               </SelectTrigger>
               <SelectContent>
@@ -141,39 +152,77 @@ export function RevolutImportDialog({
 
           <div className="grid gap-2">
             <Label>Fichier CSV Revolut</Label>
-            <div className="flex items-center gap-3">
-              <input
-                ref={inputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
-              />
-              <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
-                <Upload className="size-4" /> Choisir un fichier
-              </Button>
-              {fileName && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <CheckCircle2 className="size-3.5 text-[var(--color-success)]" />
-                  {fileName}
-                </span>
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const f = e.dataTransfer.files?.[0];
+                if (f) handleFile(f);
+              }}
+              className={cn(
+                "group flex min-h-[120px] w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors",
+                dragOver
+                  ? "border-[var(--chart-1)] bg-[var(--chart-1)]/10"
+                  : "border-border bg-muted/30 hover:border-[var(--chart-1)]/60 hover:bg-[var(--chart-1)]/5",
               )}
-            </div>
+            >
+              {fileName ? (
+                <>
+                  <CheckCircle2 className="size-6 text-[var(--color-success)]" />
+                  <div className="text-sm font-medium">{fileName}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Déposer un autre fichier ou appuyer pour changer
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Upload className="size-6 text-muted-foreground transition-colors group-hover:text-[var(--chart-1)]" />
+                  <div className="text-sm font-medium">
+                    Déposer un fichier ou appuyer pour choisir
+                  </div>
+                  <div className="text-xs text-muted-foreground">CSV exporté depuis Revolut</div>
+                </>
+              )}
+            </button>
+            {parsing && (
+              <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-1/3 animate-[revolutbar_1.1s_ease-in-out_infinite] bg-[var(--chart-1)]" />
+                <style jsx>{`
+                  @keyframes revolutbar {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(400%); }
+                  }
+                `}</style>
+              </div>
+            )}
           </div>
 
           {preview && (
             <div className="rounded-lg border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-4 py-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 text-xs">
                 <div className="font-medium">
                   Aperçu · {preview.etfs.length} ETF
                   {preview.totalDividends > 0 && (
                     <span className="text-muted-foreground">
-                      {" "}
-                      · dividendes {formatEUR(preview.totalDividends)}
+                      {" "}· dividendes {formatEUR(preview.totalDividends)}
                     </span>
                   )}
                 </div>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
                   {preview.detectedSections.map((s) => (
                     <Badge key={s} variant="secondary" className="text-[10px]">
                       {s}
@@ -195,7 +244,9 @@ export function RevolutImportDialog({
                     {preview.etfs.map((e) => (
                       <tr key={e.isin} className="border-t border-border/40">
                         <td className="px-3 py-1.5 font-mono font-medium">{e.symbol}</td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{e.name || "—"}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {e.name || "—"}
+                        </td>
                         <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
                           {e.isin}
                         </td>
@@ -221,17 +272,26 @@ export function RevolutImportDialog({
               )}
             </div>
           )}
-        </div>
+        </SheetBody>
 
-        <DialogFooter className="flex justify-end gap-2 sm:justify-end">
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+        <SheetFooter className="flex justify-end gap-2 md:justify-end">
+          <Button
+            variant="outline"
+            onClick={() => setOpen(false)}
+            disabled={pending}
+            className="flex-1 md:flex-none"
+          >
             Annuler
           </Button>
-          <Button onClick={submit} disabled={pending || !csv || !accountId}>
+          <Button
+            onClick={submit}
+            disabled={pending || !csv || !accountId}
+            className="flex-1 md:flex-none"
+          >
             {pending ? "Import…" : "Importer"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

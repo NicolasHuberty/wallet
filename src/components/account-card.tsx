@@ -57,34 +57,39 @@ export function AccountCard({
   return (
     <Link
       href={`/accounts/${id}`}
-      className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card p-5 transition-all hover:border-foreground/40 hover:shadow-md"
+      className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card p-4 transition-all active:bg-muted/40 hover:border-foreground/40 hover:shadow-md md:p-5"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full" style={{ backgroundColor: color }} />
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: color }}
+            />
             <h3 className="truncate text-sm font-semibold">{name}</h3>
           </div>
           {institution && (
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{institution}</p>
           )}
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-1 text-[10px]">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 text-[10px]">
           {annualYieldPct != null && annualYieldPct > 0 && (
-            <span className="rounded border border-border bg-muted/30 px-1.5 py-0.5 text-muted-foreground">
+            <span className="shrink-0 rounded border border-border bg-muted/30 px-1.5 py-0.5 tabular-nums text-muted-foreground">
               {annualYieldPct}%/an
             </span>
           )}
           {monthlyContribution != null && monthlyContribution > 0 && (
-            <span className="rounded border border-border bg-muted/30 px-1.5 py-0.5 text-muted-foreground">
+            <span className="shrink-0 rounded border border-border bg-muted/30 px-1.5 py-0.5 tabular-nums text-muted-foreground">
               +{formatEUR(monthlyContribution, { compact: true })}/mo
             </span>
           )}
         </div>
       </div>
 
-      <div className="mt-4 flex items-baseline gap-2">
-        <div className={`numeric text-2xl font-semibold tabular-nums ${negative ? "text-destructive" : ""}`}>
+      <div className="mt-3 flex items-baseline gap-2 md:mt-4">
+        <div
+          className={`numeric text-xl font-semibold tabular-nums md:text-2xl ${negative ? "text-destructive" : ""}`}
+        >
           {formatEUR(currentValue)}
         </div>
       </div>

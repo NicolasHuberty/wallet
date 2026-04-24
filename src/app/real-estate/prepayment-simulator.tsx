@@ -81,7 +81,7 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
       : `${sim.monthsSaved} mois de gagnés`;
 
   return (
-    <div className="mt-6 rounded-xl border border-border bg-card p-5">
+    <div className="mt-5 rounded-xl border border-border bg-card p-4 sm:mt-6 sm:p-5">
       <div className="mb-4 flex flex-col gap-1">
         <h4 className="text-sm font-semibold">Simulateur de remboursement anticipé</h4>
         <p className="text-xs text-muted-foreground">
@@ -89,14 +89,15 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
         </p>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:gap-5">
         <div className="flex flex-col gap-4">
-          <div className="rounded-lg border border-border bg-muted/30 p-4">
-            <div className="flex items-baseline justify-between">
-              <label htmlFor="extra-payment" className="text-xs uppercase tracking-wider text-muted-foreground">
-                Versement mensuel supplémentaire
+          {/* Slider card — oversized tap area for mobile */}
+          <div className="rounded-xl border border-border bg-muted/30 p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <label htmlFor="extra-payment" className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                Versement supplémentaire
               </label>
-              <span className="numeric text-xl font-semibold">{formatEUR(extra)}</span>
+              <span className="numeric text-xl font-semibold sm:text-2xl">{formatEUR(extra)}</span>
             </div>
             <input
               id="extra-payment"
@@ -106,7 +107,7 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
               step={STEP}
               value={extra}
               onChange={(e) => setExtra(Number(e.target.value))}
-              className="mt-3 w-full accent-[var(--chart-1)]"
+              className="prepayment-slider mt-4 w-full accent-[var(--chart-1)]"
               aria-label="Versement mensuel supplémentaire"
             />
             <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
@@ -121,7 +122,8 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
             </p>
           </div>
 
-          <div className="space-y-3">
+          {/* KPI stack — 3×1 on mobile, wider on desktop */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 md:grid-cols-1">
             <SimKpi
               label="Date de fin"
               primary={formatMonthYear(sim.newPayoffDate)}
@@ -149,14 +151,14 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
           )}
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-3">
+        <div className="rounded-xl border border-border bg-card p-3">
           <h5 className="mb-1 text-xs font-semibold">Solde restant — baseline vs simulation</h5>
           <p className="mb-2 text-[11px] text-muted-foreground">
             La courbe simulée rejoint plus vite le 0 grâce au versement anticipé.
           </p>
-          <div className="h-64">
+          <div className="h-56 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
+              <AreaChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id="gBaseline" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} />
@@ -174,28 +176,29 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
                   stroke="var(--muted-foreground)"
                   tickLine={false}
                   axisLine={false}
-                  fontSize={11}
-                  minTickGap={50}
+                  fontSize={10}
+                  minTickGap={60}
                 />
                 <YAxis
                   tickFormatter={(v) => formatEUR(Number(v), { compact: true })}
                   stroke="var(--muted-foreground)"
                   tickLine={false}
                   axisLine={false}
-                  fontSize={11}
-                  width={70}
+                  fontSize={10}
+                  width={52}
                 />
                 <Tooltip
                   contentStyle={{
                     background: "var(--popover)",
                     border: "1px solid var(--border)",
                     borderRadius: 8,
-                    fontSize: 12,
+                    fontSize: 11,
+                    padding: "6px 8px",
                   }}
                   labelFormatter={(v) => formatMonthYear(v as string)}
                   formatter={(value, name) => [
                     formatEUR(Number(value)),
-                    name === "simulated" ? "Simulation" : "Baseline",
+                    name === "simulated" ? "Avec versement" : "Sans",
                   ]}
                 />
                 <Legend
@@ -221,6 +224,47 @@ export function PrepaymentSimulator({ mortgage, startDate }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Oversized slider thumb (≥ 44px hit area) — keeps mobile fat-fingers happy */}
+      <style jsx>{`
+        .prepayment-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          height: 44px;
+          background: transparent;
+          cursor: pointer;
+          touch-action: none;
+        }
+        .prepayment-slider::-webkit-slider-runnable-track {
+          height: 6px;
+          background: color-mix(in oklab, var(--border) 80%, transparent);
+          border-radius: 999px;
+        }
+        .prepayment-slider::-moz-range-track {
+          height: 6px;
+          background: color-mix(in oklab, var(--border) 80%, transparent);
+          border-radius: 999px;
+        }
+        .prepayment-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 28px;
+          height: 28px;
+          margin-top: -11px;
+          background: var(--chart-1);
+          border: 3px solid var(--card);
+          border-radius: 999px;
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+        }
+        .prepayment-slider::-moz-range-thumb {
+          width: 28px;
+          height: 28px;
+          background: var(--chart-1);
+          border: 3px solid var(--card);
+          border-radius: 999px;
+          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+        }
+      `}</style>
     </div>
   );
 }
@@ -240,8 +284,8 @@ function SimKpi({
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`numeric mt-1 text-base font-semibold ${cls}`}>{primary}</div>
-      {secondary && <div className="mt-0.5 text-[11px] text-muted-foreground">{secondary}</div>}
+      <div className={`numeric mt-1 text-sm font-semibold sm:text-base ${cls}`}>{primary}</div>
+      {secondary && <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{secondary}</div>}
     </div>
   );
 }

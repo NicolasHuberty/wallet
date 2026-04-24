@@ -51,7 +51,7 @@ export function AnomalyBadge({
         <TooltipTrigger
           render={
             <span
-              className={`inline-flex items-center gap-1 rounded-full border border-border bg-background/60 px-1.5 py-0.5 text-[10px] font-medium ${tone} ${className ?? ""}`}
+              className={`inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-background/60 px-1.5 py-0.5 text-[9px] font-medium md:gap-1 md:text-[10px] ${tone} ${className ?? ""}`}
               aria-label="Anomalie détectée"
             >
               <Icon className="size-3" />

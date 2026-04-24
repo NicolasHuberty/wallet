@@ -7,5 +7,10 @@ export default async function OnboardingPage() {
   const existing = await getAccounts(h.id);
   // Already onboarded? send to dashboard.
   if (existing.length > 0) redirect("/dashboard");
-  return <OnboardingWizard householdName={h.name} />;
+  // Edge-to-edge shell — the wizard handles its own internal padding.
+  return (
+    <div className="min-h-[100dvh] bg-background">
+      <OnboardingWizard householdName={h.name} />
+    </div>
+  );
 }

@@ -29,7 +29,7 @@ export default async function RealEstatePage() {
         subtitle={`${props.length} bien${props.length > 1 ? "s" : ""} · équité ${formatEUR(equity)}`}
         action={<PropertyWizard householdId={h.id} />}
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-4 p-3 sm:space-y-6 sm:p-6 md:p-8">
         {props.length === 0 && (
           <div className="rounded-xl border border-dashed border-border bg-card p-12 text-center text-sm text-muted-foreground">
             Ajoutez votre premier bien pour le suivre.
@@ -53,10 +53,10 @@ export default async function RealEstatePage() {
 
           return (
             <section key={account.id} className="rounded-xl border border-border bg-card">
-              <div className="flex items-start justify-between border-b border-border p-5">
-                <div>
-                  <h2 className="text-lg font-semibold">{account.name}</h2>
-                  <p className="text-xs text-muted-foreground">{property.address ?? ""}{property.surfaceSqm ? ` · ${property.surfaceSqm} m²` : ""}</p>
+              <div className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold sm:text-lg">{account.name}</h2>
+                  <p className="truncate text-xs text-muted-foreground">{property.address ?? ""}{property.surfaceSqm ? ` · ${property.surfaceSqm} m²` : ""}</p>
                 </div>
                 <EditPropertyButton
                   householdId={h.id}
@@ -95,7 +95,7 @@ export default async function RealEstatePage() {
                 <Metric label="Frais mensuels" value={formatEUR(property.monthlyFees)} sub={`≈ ${formatEUR(property.monthlyFees * 12)}/an`} />
               </div>
 
-              <div className="border-t border-border p-5">
+              <div className="border-t border-border p-4 sm:p-5">
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-semibold">Frais one-shot associés</h3>
@@ -150,8 +150,8 @@ export default async function RealEstatePage() {
                 )}
               </div>
 
-              <div className="border-t border-border p-5">
-                <div className="mb-3 flex items-center justify-between">
+              <div className="border-t border-border p-4 sm:p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold">Prêt hypothécaire</h3>
                   {!mortgage && <MortgageDialog householdId={h.id} propertyId={property.id} />}
                 </div>
@@ -166,12 +166,12 @@ export default async function RealEstatePage() {
                       <Metric label="Durée" value={`${mortgage.termMonths} mois`} sub={`début ${formatDateFR(mortgage.startDate as unknown as Date)}`} />
                     </div>
 
-                    <div className="mb-3 flex items-center justify-between">
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <div className="text-sm font-semibold">Tableau d'amortissement</div>
+                        <div className="text-sm font-semibold">Tableau d&apos;amortissement</div>
                         <div className="text-xs text-muted-foreground">{entries.length > 0 ? `${entries.length} échéances` : "— non généré —"}</div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <ImportAmortizationButton mortgageId={mortgage.id} startDate={(mortgage.startDate as unknown as Date).toISOString().slice(0, 10)} />
                         <GenerateAmortizationButton mortgageId={mortgage.id} />
                         <EditMortgageButton

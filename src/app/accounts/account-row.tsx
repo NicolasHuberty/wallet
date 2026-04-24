@@ -104,7 +104,7 @@ export function AccountRow({
   const negative = isLiability(account.kind) || account.currentValue < 0;
 
   return (
-    <li className="px-5 py-3">
+    <li className="px-4 py-3 md:px-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

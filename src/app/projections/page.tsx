@@ -27,7 +27,7 @@ export default async function ProjectionsPage() {
         title="Projections"
         subtitle="Simule l'évolution de ton patrimoine sur plusieurs décennies"
       />
-      <div className="p-8">
+      <div className="p-4 sm:p-6 md:p-8">
         <ProjectionView
           accounts={accounts.map((a) => ({ kind: a.kind, currentValue: a.currentValue }))}
           defaultScenario={{

@@ -160,7 +160,7 @@ export default async function ChargesPage() {
         subtitle="Notaire, droits, travaux, taxes exceptionnelles — analyse historique et récurrence"
         action={<ChargeDialog householdId={h.id} properties={propertyOptions} />}
       />
-      <div className="space-y-6 p-8">
+      <div className="space-y-6 p-4 md:p-8">
         {/* Anomaly band */}
         <AnomalySection
           currentMonthAnomalies={currentMonthAnomalies}
@@ -168,8 +168,8 @@ export default async function ChargesPage() {
           monthKeyToLabel={monthKeyToLabel}
         />
 
-        {/* KPI band */}
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+        {/* KPI band — dense 2-col on narrow, 5-col on wide. */}
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-5">
           <Kpi label={`${thisYear}`} value={formatEUR(ytd)} sub="YTD" />
           <Kpi label="Total (toutes années)" value={formatEUR(total)} sub={`${charges.length} entrée${charges.length > 1 ? "s" : ""}`} />
           <Kpi label="Moyenne / mois" value={formatEUR(monthlyAvg)} sub={`sur ${monthsWithData} mois actifs`} />
@@ -187,22 +187,24 @@ export default async function ChargesPage() {
 
         {/* Charts */}
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          <div className="rounded-xl border border-border bg-card p-5 lg:col-span-3">
-            <div className="mb-4 flex items-baseline justify-between">
-              <div>
+          <div className="rounded-xl border border-border bg-card p-4 md:p-5 lg:col-span-3">
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 md:mb-4">
+              <div className="min-w-0">
                 <h2 className="text-base font-semibold">Frais par mois</h2>
                 <p className="text-xs text-muted-foreground">24 derniers mois</p>
               </div>
-              <span className="text-xs text-muted-foreground">
-                Max du mois :{" "}
-                {formatEUR(Math.max(...monthlyData.map((d) => d.amount), 0), { compact: true })}
+              <span className="text-[11px] text-muted-foreground md:text-xs">
+                Max :{" "}
+                <span className="tabular-nums">
+                  {formatEUR(Math.max(...monthlyData.map((d) => d.amount), 0), { compact: true })}
+                </span>
               </span>
             </div>
             <MonthlyBars data={monthlyData} />
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-5 lg:col-span-2">
-            <h2 className="mb-4 text-base font-semibold">Par catégorie</h2>
+          <div className="rounded-xl border border-border bg-card p-4 md:p-5 lg:col-span-2">
+            <h2 className="mb-3 text-base font-semibold md:mb-4">Par catégorie</h2>
             <CategoryDonut data={donutData} />
             <ul className="mt-4 max-h-40 space-y-1.5 overflow-y-auto text-xs">
               {donutData.map((d) => {
@@ -226,12 +228,14 @@ export default async function ChargesPage() {
         {/* Recurring + Top expensive */}
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3 md:px-5">
               <div className="flex items-center gap-2">
                 <RefreshCw className="size-3.5 text-muted-foreground" />
                 <h2 className="text-base font-semibold">Les plus récurrents</h2>
               </div>
-              <span className="text-xs text-muted-foreground">par nombre d&apos;occurrences</span>
+              <span className="hidden text-xs text-muted-foreground md:inline">
+                par occurrences
+              </span>
             </div>
             {mostRecurrent.length === 0 ? (
               <div className="p-6 text-center text-xs text-muted-foreground">
@@ -240,22 +244,27 @@ export default async function ChargesPage() {
             ) : (
               <ul className="divide-y divide-border">
                 {mostRecurrent.map((r) => (
-                  <li key={r.label} className="flex items-center justify-between px-5 py-2.5 text-sm">
+                  <li
+                    key={r.label}
+                    className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm md:px-5"
+                  >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium">{r.label}</span>
                         {r.isYearly && (
-                          <Badge variant="outline" className="text-[9px] uppercase tracking-wider text-[var(--moss-deep,theme(colors.emerald.700))]">
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 text-[9px] uppercase tracking-wider text-[var(--moss-deep,theme(colors.emerald.700))]"
+                          >
                             Annuel
                           </Badge>
                         )}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {r.count} occurrences · ~{r.avgGapMonths.toFixed(1)} mois entre chaque ·
-                        moyenne {formatEUR(r.avg)}
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                        {r.count} occ · ~{r.avgGapMonths.toFixed(1)} mois · moy. {formatEUR(r.avg)}
                       </div>
                     </div>
-                    <div className="numeric tabular-nums text-sm font-medium">
+                    <div className="numeric shrink-0 text-sm font-medium tabular-nums">
                       {formatEUR(r.total)}
                     </div>
                   </li>
@@ -265,7 +274,7 @@ export default async function ChargesPage() {
           </div>
 
           <div className="rounded-xl border border-border bg-card">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3 md:px-5">
               <div className="flex items-center gap-2">
                 <TrendingUp className="size-3.5 text-muted-foreground" />
                 <h2 className="text-base font-semibold">Top 10 — plus chers</h2>
@@ -278,8 +287,8 @@ export default async function ChargesPage() {
             ) : (
               <ul className="divide-y divide-border">
                 {topExpensive.map((c, i) => (
-                  <li key={c.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
-                    <span className="mono w-5 shrink-0 text-[10px] text-muted-foreground">
+                  <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm md:px-5">
+                    <span className="mono w-5 shrink-0 text-[10px] tabular-nums text-muted-foreground">
                       {String(i + 1).padStart(2, "0")}
                     </span>
                     <span
@@ -290,12 +299,12 @@ export default async function ChargesPage() {
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{c.label}</div>
-                      <div className="text-[11px] text-muted-foreground">
+                      <div className="truncate text-[11px] text-muted-foreground">
                         {formatDateFR(c.date as unknown as Date)} ·{" "}
                         {resolveCategoryLabel(c.category, chargeCategoryLabel)}
                       </div>
                     </div>
-                    <div className="numeric tabular-nums text-sm font-medium text-destructive">
+                    <div className="numeric shrink-0 text-sm font-medium tabular-nums text-destructive">
                       -{formatEUR(c.amount)}
                     </div>
                   </li>
@@ -342,7 +351,7 @@ export default async function ChargesPage() {
 
         {/* Full timeline */}
         <section className="rounded-xl border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border p-5">
+          <div className="flex items-center justify-between border-b border-border p-4 md:p-5">
             <div>
               <h2 className="text-base font-semibold">Tous les frais</h2>
               <p className="text-xs text-muted-foreground">
@@ -353,7 +362,7 @@ export default async function ChargesPage() {
           </div>
           <ul className="divide-y divide-border">
             {sorted.length === 0 && (
-              <li className="p-12 text-center text-sm text-muted-foreground">
+              <li className="p-8 text-center text-sm text-muted-foreground md:p-12">
                 Aucun frais. Ajoute ton premier frais one-shot.
               </li>
             )}
@@ -365,20 +374,20 @@ export default async function ChargesPage() {
               return (
               <li
                 key={c.id}
-                className={`flex items-start gap-4 px-5 py-3 text-sm ${isFlagged ? "bg-[color:oklch(0.97_0.05_60_/_0.35)]" : ""}`}
+                className={`flex items-start gap-3 px-4 py-3 text-sm md:gap-4 md:px-5 ${isFlagged ? "bg-[color:oklch(0.97_0.05_60_/_0.35)]" : ""}`}
               >
                 <div
-                  className="mt-1 size-2 shrink-0 rounded-full"
+                  className="mt-1.5 size-2 shrink-0 rounded-full"
                   style={{
                     backgroundColor: resolveCategoryColor(c.category, chargeCategoryColor),
                   }}
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{c.label}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
+                    <span className="truncate font-medium">{c.label}</span>
                     {!c.includeInCostBasis && (
-                      <Badge variant="outline" className="text-[10px]">
-                        Hors coût de revient
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                        Hors coût
                       </Badge>
                     )}
                     {anomaly && (
@@ -391,23 +400,23 @@ export default async function ChargesPage() {
                       />
                     )}
                   </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>{formatDateFR(d)}</span>
-                    <span>·</span>
-                    <Badge variant="secondary" className="text-[10px]">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground md:gap-2 md:text-xs">
+                    <span className="tabular-nums">{formatDateFR(d)}</span>
+                    <Badge variant="secondary" className="shrink-0 text-[10px]">
                       {resolveCategoryLabel(c.category, chargeCategoryLabel)}
                     </Badge>
                     {c.propertyId && propertyById[c.propertyId] && (
-                      <>
-                        <span>·</span>
-                        <span>🏠 {propertyById[c.propertyId].name}</span>
-                      </>
+                      <span className="truncate">🏠 {propertyById[c.propertyId].name}</span>
                     )}
                   </div>
-                  {c.notes && <div className="mt-1 text-xs text-muted-foreground">{c.notes}</div>}
+                  {c.notes && (
+                    <div className="mt-1 text-[11px] text-muted-foreground md:text-xs">
+                      {c.notes}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="numeric tabular-nums font-medium">{formatEUR(c.amount)}</div>
+                <div className="flex shrink-0 items-center gap-1 md:gap-2">
+                  <div className="numeric font-medium tabular-nums">{formatEUR(c.amount)}</div>
                   <EditChargeButton
                     householdId={h.id}
                     properties={propertyOptions}
@@ -444,10 +453,18 @@ function Kpi({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="numeric mt-1.5 text-xl font-semibold tabular-nums">{value}</div>
-      {sub && <div className="mt-1 truncate text-[11px] text-muted-foreground">{sub}</div>}
+    <div className="rounded-xl border border-border bg-card p-3 md:p-5">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground md:text-[11px]">
+        {label}
+      </div>
+      <div className="numeric mt-1 text-base font-semibold tabular-nums md:mt-1.5 md:text-xl">
+        {value}
+      </div>
+      {sub && (
+        <div className="mt-0.5 truncate text-[10px] text-muted-foreground md:mt-1 md:text-[11px]">
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -491,13 +508,13 @@ function AnomalySection({
       : "Aucune anomalie ce mois-ci — voici les derniers écarts détectés.";
 
   return (
-    <section className="rounded-xl border border-dashed border-[var(--color-warning,theme(colors.amber.400))]/60 bg-[color:oklch(0.97_0.05_80_/_0.4)] p-5">
-      <div className="mb-3 flex items-center gap-2">
-        <AlertTriangle className="size-4 text-[var(--color-warning,theme(colors.amber.600))]" />
+    <section className="rounded-xl border border-dashed border-[var(--color-warning,theme(colors.amber.400))]/60 bg-[color:oklch(0.97_0.05_80_/_0.4)] p-4 md:p-5">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <AlertTriangle className="size-4 shrink-0 text-[var(--color-warning,theme(colors.amber.600))]" />
         <h2 className="text-base font-semibold">{title}</h2>
-        <span className="text-xs text-muted-foreground">{subtitle}</span>
+        <span className="hidden text-xs text-muted-foreground md:inline">{subtitle}</span>
       </div>
-      <ul className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {highlighted.map((a) => {
           const infinite = !Number.isFinite(a.deviation);
           const Icon = infinite ? AlertTriangle : a.deviation > 0 ? TrendingUp : TrendingDown;

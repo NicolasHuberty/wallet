@@ -7,13 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { toast } from "sonner";
 import {
   saveMonthlyCheckIn,
@@ -87,13 +88,11 @@ type CashflowSummary = {
   net: number;
 };
 
-// State per account (values used for live totals)
 type RowInput = {
   growth: number;
   contribution: number;
 };
 
-// State per mortgage
 type MortgageInput = {
   principal: number;
   interest: number;
@@ -107,7 +106,6 @@ function pickAmortEntry(entries: AmortEntry[], date: string): AmortEntry | null 
   if (!entries || entries.length === 0) return null;
   const exact = entries.find((e) => sameMonth(e.dueDate, date));
   if (exact) return exact;
-  // Fall back to the next future entry
   const future = entries.find((e) => e.dueDate >= date);
   return future ?? entries[entries.length - 1];
 }
@@ -155,6 +153,60 @@ type ChargeItem = {
   notes: string | null;
 };
 
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+// Big-input base styles. We aim for 16px (prevents iOS Safari zoom) with
+// tabular numerals, right-aligned, padded for the € suffix.
+const BIG_MONEY_INPUT =
+  "h-12 pr-9 text-right text-lg font-medium tabular-nums numeric md:h-8 md:text-sm md:pr-6 md:font-normal";
+
+function MoneyInput({
+  value,
+  onChange,
+  disabled,
+  title,
+  suffix = "€",
+  tabIndex,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+  title?: string;
+  suffix?: string;
+  tabIndex?: number;
+}) {
+  return (
+    <div className="relative">
+      <Input
+        type="number"
+        step="0.01"
+        inputMode="decimal"
+        pattern="[0-9]*[.,]?[0-9]*"
+        enterKeyHint="next"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className={BIG_MONEY_INPUT}
+        disabled={disabled}
+        title={title}
+        tabIndex={tabIndex}
+      />
+      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground md:right-2 md:text-[10px]">
+        {suffix}
+      </span>
+    </div>
+  );
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ---------------------------------------------------------------------------
+// CheckInForm
+// ---------------------------------------------------------------------------
+
 export function CheckInForm({
   householdId,
   selectedMonth,
@@ -195,8 +247,8 @@ export function CheckInForm({
   const router = useRouter();
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  // Parse selectedMonth for display + next/prev nav
   const [selY, selM] = selectedMonth.split("-").map(Number);
   const monthDate = new Date(selY, selM - 1, 1);
   const monthLabel = monthDate.toLocaleDateString("fr-BE", {
@@ -224,8 +276,6 @@ export function CheckInForm({
 
   const canGoNext = selectedMonth < todayKey;
 
-  // Initial per-row state — pre-filled from `prefill` (computed server-side
-  // from the previous-month snapshot plus expected DCA / amortization).
   const [rowState, setRowState] = useState<Record<string, RowInput>>(() => {
     const out: Record<string, RowInput> = {};
     for (const a of accounts) {
@@ -237,8 +287,6 @@ export function CheckInForm({
     return out;
   });
 
-  // When the selected month changes the server returns a new set of accounts
-  // with fresh prefills → resync local state.
   useEffect(() => {
     setRowState(() => {
       const out: Record<string, RowInput> = {};
@@ -253,7 +301,6 @@ export function CheckInForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth]);
 
-  // Mortgage state: pre-fill from amortization entry for the selected month
   const [mortgageState, setMortgageState] = useState<Record<string, MortgageInput>>(() => {
     const out: Record<string, MortgageInput> = {};
     for (const m of mortgages) {
@@ -261,7 +308,6 @@ export function CheckInForm({
       if (entry) {
         out[m.mortgageId] = { principal: round2(entry.principal), interest: round2(entry.interest) };
       } else {
-        // Fallback: estimate from interest rate
         const monthlyInterest = (m.remainingBalance * m.interestRatePct) / 100 / 12;
         const principal = Math.max(0, m.monthlyPayment - monthlyInterest);
         out[m.mortgageId] = { principal: round2(principal), interest: round2(monthlyInterest) };
@@ -270,7 +316,6 @@ export function CheckInForm({
     return out;
   });
 
-  // Re-pick amortization entry when selected month changes (use first of month as reference)
   const firstOfMonth = `${selectedMonth}-01`;
   useEffect(() => {
     setMortgageState((prev) => {
@@ -292,10 +337,6 @@ export function CheckInForm({
   function updateRow(id: string, key: keyof RowInput, value: number) {
     setRowState((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }
-  /**
-   * Reset the growth / contribution inputs of a single row back to the
-   * server-computed estimation (previous month + expected DCA / interest).
-   */
   function resetRow(id: string) {
     const a = accounts.find((acc) => acc.id === id);
     if (!a) return;
@@ -312,8 +353,6 @@ export function CheckInForm({
   }
 
   function previousValueFor(a: AccountRow): number {
-    // Prefer the snapshot-based value; fall back to currentValue for
-    // accounts with no prior history (first check-in ever).
     if (a.prefill.previousSource !== "none") return a.prefill.previousValue;
     return a.currentValue;
   }
@@ -323,8 +362,6 @@ export function CheckInForm({
     const base = previousValueFor(a);
     if (!s) return base;
     if (isLiability(a.kind)) {
-      // Account value is negative; principal paid makes it less negative → newValue = prev + principal
-      // For loan account we use contribution field as "principal paid" if amortization unavailable.
       return base + s.contribution + s.growth;
     }
     return base + s.growth + s.contribution;
@@ -345,24 +382,33 @@ export function CheckInForm({
       else assets += v;
     }
     return { assets, liabilities, net: assets - liabilities };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accounts, rowState]);
 
-  // Per-expense actual state for this month (key = expenseId)
+  // Delta from previous snapshot totals → used as feedback in the sticky
+  // submit bar on mobile.
+  const previousTotalNet = useMemo(() => {
+    let assets = 0;
+    let liabilities = 0;
+    for (const a of accounts) {
+      const v = previousValueFor(a);
+      if (isLiability(a.kind) || v < 0) liabilities += Math.abs(v);
+      else assets += v;
+    }
+    return assets - liabilities;
+  }, [accounts]);
+  const deltaNet = totals.net - previousTotalNet;
+
   const [expenseThisMonth, setExpenseThisMonth] = useState<Record<string, number>>(() =>
-    Object.fromEntries(expenseItems.map((e) => [e.id, round2(e.current)]))
+    Object.fromEntries(expenseItems.map((e) => [e.id, round2(e.current)])),
   );
   const totalExpensesThisMonth = useMemo(
     () =>
       expenseItems.reduce((s, e) => s + (expenseThisMonth[e.id] ?? e.current), 0),
-    [expenseItems, expenseThisMonth]
+    [expenseItems, expenseThisMonth],
   );
 
   const totalDCA = accounts.reduce((s, a) => s + (a.monthlyContribution ?? 0), 0);
-  const monthlyInterestIncome = accounts.reduce(
-    (s, a) => s + (isLiability(a.kind) ? 0 : a.prefill.growth),
-    0
-  );
-  const realSurplus = cashflow.net - totalDCA;
 
   const groups = useMemo(() => {
     const map = new Map<AccountKind, AccountRow[]>();
@@ -385,8 +431,6 @@ export function CheckInForm({
           month: selectedMonth,
           note: note || null,
           rows: accounts
-            // Skip accounts created after this month — we shouldn't overwrite
-            // their currentValue with a 0-based estimate.
             .filter((a) => !a.prefill.isFutureAccount)
             .map((a) => ({
               accountId: a.id,
@@ -408,7 +452,6 @@ export function CheckInForm({
     });
   }
 
-  // Net revenu = (revenus récurrents + revenus exceptionnels) − (dépenses + frais one-shot)
   const netIncomeWithCharges =
     cashflow.totalIncome +
     monthIncomesTotal -
@@ -416,8 +459,32 @@ export function CheckInForm({
     monthChargesTotal;
   const remainsAfterDCA = netIncomeWithCharges - totalDCA;
 
+  async function handleRemoveCharge(id: string, label: string) {
+    if (confirmDeleteId !== `charge:${id}`) {
+      setConfirmDeleteId(`charge:${id}`);
+      setTimeout(() => setConfirmDeleteId((c) => (c === `charge:${id}` ? null : c)), 3000);
+      return;
+    }
+    await removeCharge(id);
+    toast.success(`"${label}" supprimé`);
+    setConfirmDeleteId(null);
+    router.refresh();
+  }
+
+  async function handleRemoveIncome(id: string, label: string) {
+    if (confirmDeleteId !== `income:${id}`) {
+      setConfirmDeleteId(`income:${id}`);
+      setTimeout(() => setConfirmDeleteId((c) => (c === `income:${id}` ? null : c)), 3000);
+      return;
+    }
+    await removeOneOffIncome(id);
+    toast.success(`"${label}" supprimé`);
+    setConfirmDeleteId(null);
+    router.refresh();
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-32 md:pb-6">
       <section className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Kpi
           label="Revenus récurrents"
@@ -459,15 +526,17 @@ export function CheckInForm({
         />
       </section>
 
-
-      <section className="rounded-xl border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        {/* Header + month nav */}
+        <div className="flex flex-col gap-4 border-b border-border px-4 py-4 md:flex-row md:flex-wrap md:items-center md:justify-between md:px-5">
           <div>
             <h2 className="text-base font-semibold">Mise à jour mensuelle</h2>
-            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Sparkles className="size-3 text-[var(--chart-1)]" />
-              Pré-remplissage depuis le mois précédent + DCA / intérêts / amortissement
-              attendus. Ajuste si besoin — « réinitialiser » annule tes modifications.
+            <p className="mt-0.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Sparkles className="mt-0.5 size-3 shrink-0 text-[var(--chart-1)]" />
+              <span>
+                Pré-remplissage depuis le mois précédent + DCA / intérêts / amortissement
+                attendus. Ajuste si besoin — « réinitialiser » annule tes modifications.
+              </span>
             </p>
             {lastCheckInDate && (
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -480,20 +549,20 @@ export function CheckInForm({
               </p>
             )}
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-1 rounded-lg border border-border bg-background p-1 md:flex-none">
               <Button
                 size="icon"
                 variant="ghost"
                 onClick={() => shiftMonth(-1)}
-                className="size-7"
+                className="size-9 md:size-7"
                 title="Mois précédent"
               >
                 <ChevronLeft className="size-4" />
               </Button>
-              <div className="relative flex items-center gap-2 px-2">
+              <div className="relative flex flex-1 items-center gap-2 px-2">
                 <CalendarDays className="size-3.5 text-muted-foreground" />
-                <div className="min-w-[9rem] text-center text-sm font-semibold capitalize">
+                <div className="min-w-[9rem] flex-1 text-center text-sm font-semibold capitalize">
                   {monthLabel}
                 </div>
                 <input
@@ -509,32 +578,30 @@ export function CheckInForm({
                 size="icon"
                 variant="ghost"
                 onClick={() => shiftMonth(1)}
-                className="size-7"
+                className="size-9 md:size-7"
                 title={canGoNext ? "Mois suivant" : "Mois actuel atteint"}
                 disabled={!canGoNext}
               >
                 <ChevronRight className="size-4" />
               </Button>
-              {selectedMonth !== todayKey && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-[11px]"
-                  onClick={goCurrent}
-                >
-                  Mois courant
-                </Button>
-              )}
             </div>
-            <Button onClick={submit} disabled={pending}>
-              <Save className="size-4" />
-              {pending ? "Enregistrement…" : `Enregistrer ${monthLabel}`}
-            </Button>
+            {selectedMonth !== todayKey && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="hidden h-7 text-[11px] md:inline-flex"
+                onClick={goCurrent}
+              >
+                Mois courant
+              </Button>
+            )}
           </div>
         </div>
 
+        {/* ---- ACCOUNT CARDS (mobile) / GRID (desktop) ---- */}
         <div className="divide-y divide-border">
-          <div className="grid grid-cols-12 gap-3 border-b border-border bg-muted/30 px-5 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+          {/* Desktop column headers — hidden on mobile. */}
+          <div className="hidden grid-cols-12 gap-3 border-b border-border bg-muted/30 px-5 py-2 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
             <div className="col-span-4">Compte</div>
             <div className="col-span-2 text-right">Avant</div>
             <div className="col-span-2 text-right">
@@ -553,7 +620,7 @@ export function CheckInForm({
             const deltaKind = subtotalNew - subtotalOld;
             return (
               <div key={kind}>
-                <div className="flex items-center justify-between px-5 py-2.5">
+                <div className="flex items-center justify-between px-4 py-2.5 md:px-5">
                   <div className="flex items-center gap-3">
                     <span
                       className="size-2.5 rounded-full"
@@ -562,15 +629,16 @@ export function CheckInForm({
                     <h3 className="text-sm font-semibold">{accountKindLabel[kind]}</h3>
                     <Badge variant="secondary">{rows.length}</Badge>
                   </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="text-muted-foreground">
+                  <div className="flex items-center gap-2 text-xs md:gap-3">
+                    <span className="hidden text-muted-foreground md:inline">
                       {formatEUR(subtotalOld)} → {formatEUR(subtotalNew)}
                     </span>
                     <DeltaPill value={deltaKind} invertColors={isLiability(kind)} />
                   </div>
                 </div>
-                <div>
-                  {rows.map((a) => {
+
+                <div className="divide-y divide-border/40">
+                  {rows.map((a, idx) => {
                     const s = rowState[a.id];
                     const prev = previousValueFor(a);
                     const nv = newValueFor(a);
@@ -590,7 +658,6 @@ export function CheckInForm({
 
                     const pf = a.prefill;
                     const disabled = pf.isFutureAccount || pf.isFullyRepaid;
-                    // Detect whether the user has modified the pre-filled values.
                     const isCustomized =
                       s != null &&
                       (Math.abs((s.growth ?? 0) - pf.growth) > 0.005 ||
@@ -605,14 +672,30 @@ export function CheckInForm({
                             ? "valeur actuelle"
                             : "mois précédent";
 
+                    // Mobile: one card per account; desktop: grid row.
                     return (
                       <div
                         key={a.id}
-                        className={`grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-2 text-sm ${disabled ? "opacity-60" : ""}`}
+                        className={`px-4 py-3 md:grid md:grid-cols-12 md:items-center md:gap-3 md:px-5 md:py-2 md:text-sm ${
+                          disabled ? "opacity-60" : ""
+                        }`}
                       >
-                        <div className="col-span-4 min-w-0">
-                          <div className="truncate font-medium">{a.name}</div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {/* Account label + metadata */}
+                        <div className="md:col-span-4 md:min-w-0">
+                          <div className="flex items-center justify-between gap-2 md:block">
+                            <div className="truncate text-base font-semibold md:text-sm md:font-medium">
+                              {a.name}
+                            </div>
+                            <div className="shrink-0 text-right md:hidden">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                Avant
+                              </div>
+                              <div className="numeric text-sm tabular-nums text-muted-foreground">
+                                {formatEUR(prev)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                             {a.institution && <span>{a.institution}</span>}
                             {rateBadge != null && (
                               <Badge variant="outline" className="text-[10px]">
@@ -627,93 +710,98 @@ export function CheckInForm({
                                   currentDCA={a.monthlyContribution}
                                 />
                               )}
+                            <span className="md:hidden">· {prevHintLabel}</span>
                           </div>
                         </div>
 
-                        <div className="col-span-2 text-right text-xs text-muted-foreground numeric">
+                        {/* Desktop-only "Avant" column */}
+                        <div className="hidden md:col-span-2 md:block md:text-right md:text-xs md:text-muted-foreground md:numeric">
                           <div>{formatEUR(prev)}</div>
                           <div className="text-[10px] text-muted-foreground/70">
                             {prevHintLabel}
                           </div>
                         </div>
 
-                        <div className="col-span-2">
-                          {growthLabel ? (
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={s?.growth ?? 0}
-                                onChange={(e) =>
-                                  updateRow(a.id, "growth", Number(e.target.value))
-                                }
-                                className="h-8 pr-6 text-right tabular-nums"
-                                disabled={disabled}
-                              />
-                              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                                €
+                        {/* Inputs — stacked on mobile, columns on desktop */}
+                        <div className="mt-3 grid grid-cols-2 gap-3 md:col-span-4 md:mt-0 md:contents">
+                          <div className="md:col-span-2">
+                            {growthLabel ? (
+                              <>
+                                <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                                  {growthLabel}
+                                </Label>
+                                <MoneyInput
+                                  value={s?.growth ?? 0}
+                                  onChange={(v) => updateRow(a.id, "growth", v)}
+                                  disabled={disabled}
+                                  tabIndex={idx * 2 + 1}
+                                  title={growthLabel}
+                                />
+                              </>
+                            ) : (
+                              <div className="h-12 md:h-8" />
+                            )}
+                          </div>
+                          <div className="md:col-span-2">
+                            {a.kind !== "real_estate" ? (
+                              <>
+                                <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                                  {contribLabel}
+                                </Label>
+                                <MoneyInput
+                                  value={s?.contribution ?? 0}
+                                  onChange={(v) => updateRow(a.id, "contribution", v)}
+                                  disabled={disabled}
+                                  title={contribLabel}
+                                  tabIndex={idx * 2 + 2}
+                                />
+                              </>
+                            ) : (
+                              <div className="h-12 md:h-8" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Après + delta — summary row on mobile, columns on desktop */}
+                        <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-3 md:col-span-2 md:mt-0 md:border-none md:pt-0 md:contents">
+                          <div className="md:col-span-1 md:text-right md:text-xs md:font-medium md:numeric">
+                            <div className="flex items-baseline gap-2 md:block">
+                              <span className="text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                                Après
+                              </span>
+                              <span className="numeric text-base font-semibold tabular-nums md:text-xs md:font-medium">
+                                {formatEUR(nv)}
                               </span>
                             </div>
-                          ) : (
-                            <div className="h-8" />
-                          )}
-                        </div>
-
-                        <div className="col-span-2">
-                          {a.kind !== "real_estate" ? (
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={s?.contribution ?? 0}
-                                onChange={(e) =>
-                                  updateRow(a.id, "contribution", Number(e.target.value))
-                                }
-                                className="h-8 pr-6 text-right tabular-nums"
-                                title={contribLabel}
-                                disabled={disabled}
-                              />
-                              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                                €
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="h-8" />
-                          )}
-                        </div>
-
-                        <div className="col-span-1 text-right text-xs font-medium numeric">
-                          <div>{formatEUR(nv)}</div>
-                          {!disabled && !pf.isFirstMonth && (
-                            <div className="flex items-center justify-end gap-1 text-[10px] font-normal text-muted-foreground/80">
-                              {isCustomized ? (
-                                <button
-                                  type="button"
-                                  onClick={() => resetRow(a.id)}
-                                  className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                                  title={`Réinitialiser à l'estimation ${formatEUR(pf.expectedValue)}`}
-                                >
-                                  <RotateCcw className="size-2.5" />
-                                  réinitialiser
-                                </button>
-                              ) : (
-                                <span
-                                  className="text-[10px] text-muted-foreground/70"
-                                  title="Valeur estimée à partir du mois précédent"
-                                >
-                                  estimation
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="col-span-1 flex justify-end">
-                          <DeltaPill
-                            value={delta}
-                            small
-                            invertColors={isLiability(a.kind)}
-                          />
+                            {!disabled && !pf.isFirstMonth && (
+                              <div className="mt-0.5 flex items-center justify-start gap-1 text-[10px] font-normal text-muted-foreground/80 md:justify-end">
+                                {isCustomized ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => resetRow(a.id)}
+                                    className="h-9 min-h-[44px] min-w-[44px] gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:text-foreground md:h-6 md:min-h-0 md:min-w-0 md:px-1 md:text-[10px]"
+                                    title={`Réinitialiser à l'estimation ${formatEUR(pf.expectedValue)}`}
+                                  >
+                                    <RotateCcw className="size-3.5 md:size-2.5" />
+                                    <span className="md:hidden">Estimation</span>
+                                    <span className="hidden md:inline">réinitialiser</span>
+                                  </Button>
+                                ) : (
+                                  <span
+                                    className="text-[10px] text-muted-foreground/70"
+                                    title="Valeur estimée à partir du mois précédent"
+                                  >
+                                    estimation
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div className="md:col-span-1 md:flex md:justify-end">
+                            <DeltaPill value={delta} small invertColors={isLiability(a.kind)} />
+                          </div>
                         </div>
                       </div>
                     );
@@ -723,9 +811,10 @@ export function CheckInForm({
             );
           })}
 
+          {/* Mortgages */}
           {mortgages.length > 0 && (
             <div>
-              <div className="flex items-center justify-between px-5 py-2.5">
+              <div className="flex items-center justify-between px-4 py-2.5 md:px-5">
                 <div className="flex items-center gap-3">
                   <span
                     className="size-2.5 rounded-full"
@@ -734,11 +823,11 @@ export function CheckInForm({
                   <h3 className="text-sm font-semibold">Crédits — amortissement du mois</h3>
                   <Badge variant="secondary">{mortgages.length}</Badge>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  Pré-rempli depuis le tableau d'amortissement
+                <span className="hidden text-xs text-muted-foreground md:inline">
+                  Pré-rempli depuis le tableau d&apos;amortissement
                 </span>
               </div>
-              <div className="grid grid-cols-12 gap-3 border-t border-border/60 bg-muted/20 px-5 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="hidden grid-cols-12 gap-3 border-t border-border/60 bg-muted/20 px-5 py-2 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
                 <div className="col-span-4">Crédit</div>
                 <div className="col-span-2 text-right">Solde avant</div>
                 <div className="col-span-2 text-right">Capital amorti</div>
@@ -753,11 +842,23 @@ export function CheckInForm({
                 return (
                   <div
                     key={m.mortgageId}
-                    className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-2 text-sm"
+                    className="border-t border-border/40 px-4 py-3 md:grid md:grid-cols-12 md:items-center md:gap-3 md:px-5 md:py-2 md:text-sm"
                   >
-                    <div className="col-span-4 min-w-0">
-                      <div className="truncate font-medium">{m.accountName}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <div className="md:col-span-4 md:min-w-0">
+                      <div className="flex items-center justify-between gap-2 md:block">
+                        <div className="truncate text-base font-semibold md:text-sm md:font-medium">
+                          {m.accountName}
+                        </div>
+                        <div className="shrink-0 text-right md:hidden">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Solde avant
+                          </div>
+                          <div className="numeric text-sm tabular-nums text-muted-foreground">
+                            {formatEUR(m.remainingBalance)}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                         <span>mensualité {formatEUR(m.monthlyPayment)}</span>
                         <Badge variant="outline" className="text-[10px]">
                           {m.interestRatePct}%
@@ -769,50 +870,46 @@ export function CheckInForm({
                         )}
                       </div>
                     </div>
-                    <div className="col-span-2 text-right text-xs text-muted-foreground numeric">
+
+                    <div className="hidden md:col-span-2 md:block md:text-right md:text-xs md:text-muted-foreground md:numeric">
                       {formatEUR(m.remainingBalance)}
                     </div>
-                    <div className="col-span-2">
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          step="0.01"
+
+                    <div className="mt-3 grid grid-cols-2 gap-3 md:col-span-4 md:mt-0 md:contents">
+                      <div className="md:col-span-2">
+                        <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                          Capital amorti
+                        </Label>
+                        <MoneyInput
                           value={s?.principal ?? 0}
-                          onChange={(e) =>
-                            updateMortgage(m.mortgageId, "principal", Number(e.target.value))
-                          }
-                          className="h-8 pr-6 text-right tabular-nums"
+                          onChange={(v) => updateMortgage(m.mortgageId, "principal", v)}
+                          title="Capital amorti"
                         />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                          €
-                        </span>
                       </div>
-                    </div>
-                    <div className="col-span-2">
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          step="0.01"
+                      <div className="md:col-span-2">
+                        <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                          Intérêts payés
+                        </Label>
+                        <MoneyInput
                           value={s?.interest ?? 0}
-                          onChange={(e) =>
-                            updateMortgage(m.mortgageId, "interest", Number(e.target.value))
-                          }
-                          className="h-8 pr-6 text-right tabular-nums"
+                          onChange={(v) => updateMortgage(m.mortgageId, "interest", v)}
+                          title="Intérêts payés"
                         />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                          €
-                        </span>
                       </div>
                     </div>
-                    <div className="col-span-1 text-right text-xs font-medium numeric">
-                      {formatEUR(nb)}
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <DeltaPill
-                        value={nb - m.remainingBalance}
-                        small
-                        invertColors
-                      />
+
+                    <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-3 md:col-span-2 md:mt-0 md:border-none md:pt-0 md:contents">
+                      <div className="md:col-span-1 md:text-right md:text-xs md:font-medium md:numeric">
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                          Après{" "}
+                        </span>
+                        <span className="numeric text-base font-semibold tabular-nums md:text-xs md:font-medium">
+                          {formatEUR(nb)}
+                        </span>
+                      </div>
+                      <div className="md:col-span-1 md:flex md:justify-end">
+                        <DeltaPill value={nb - m.remainingBalance} small invertColors />
+                      </div>
                     </div>
                   </div>
                 );
@@ -820,7 +917,7 @@ export function CheckInForm({
             </div>
           )}
 
-          {/* Revenus récurrents (read-only) */}
+          {/* Recurring incomes (read-only) */}
           <SectionHeader
             icon={<Wallet className="size-3.5" />}
             title="Revenus récurrents"
@@ -830,12 +927,12 @@ export function CheckInForm({
             dotColor="var(--color-success)"
           />
           {incomeItems.length === 0 ? (
-            <div className="px-5 py-3 text-xs text-muted-foreground">
+            <div className="px-4 py-3 text-xs text-muted-foreground md:px-5">
               Aucun revenu récurrent · à ajouter depuis la page Dépenses &amp; revenus.
             </div>
           ) : (
-            <div>
-              <div className="grid grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="divide-y divide-border/40">
+              <div className="hidden grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
                 <div className="col-span-5">Libellé</div>
                 <div className="col-span-3">Catégorie</div>
                 <div className="col-span-3 text-right">Montant mensuel</div>
@@ -844,14 +941,19 @@ export function CheckInForm({
               {incomeItems.map((i) => (
                 <div
                   key={i.id}
-                  className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-1.5 text-sm"
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 md:grid md:grid-cols-12 md:gap-3 md:px-5 md:py-1.5"
                 >
-                  <div className="col-span-5 truncate font-medium">{i.label}</div>
-                  <div className="col-span-3 text-xs text-muted-foreground">{i.category}</div>
-                  <div className="col-span-3 text-right numeric font-medium text-[var(--color-success)]">
-                    +{formatEUR(i.amount)}
+                  <div className="min-w-0 md:col-span-5">
+                    <div className="truncate text-sm font-medium">{i.label}</div>
+                    <div className="text-[11px] text-muted-foreground md:hidden">{i.category}</div>
                   </div>
-                  <div className="col-span-1 flex justify-end">
+                  <div className="hidden md:col-span-3 md:block md:text-xs md:text-muted-foreground">{i.category}</div>
+                  <div className="shrink-0 md:col-span-3 md:text-right">
+                    <span className="numeric text-sm font-medium tabular-nums text-[var(--color-success)]">
+                      +{formatEUR(i.amount)}
+                    </span>
+                  </div>
+                  <div className="md:col-span-1 md:flex md:justify-end">
                     <NotesPopover
                       itemLabel={i.label}
                       existingNote={i.notes}
@@ -861,7 +963,7 @@ export function CheckInForm({
                     />
                   </div>
                   {i.notes && (
-                    <div className="col-span-12">
+                    <div className="w-full md:col-span-12">
                       <InlineNote note={i.notes} />
                     </div>
                   )}
@@ -870,7 +972,7 @@ export function CheckInForm({
             </div>
           )}
 
-          {/* Revenus exceptionnels ce mois */}
+          {/* One-off incomes */}
           <SectionHeader
             icon={<PiggyBank className="size-3.5" />}
             title="Revenus exceptionnels ce mois"
@@ -880,12 +982,12 @@ export function CheckInForm({
             dotColor="var(--color-success)"
           />
           {recentIncomes.length === 0 ? (
-            <div className="px-5 py-3 text-xs text-muted-foreground">
+            <div className="px-4 py-3 text-xs text-muted-foreground md:px-5">
               Aucun revenu exceptionnel ce mois. Prime, remboursement, vente, dividende…
             </div>
           ) : (
-            <div>
-              <div className="grid grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="divide-y divide-border/40">
+              <div className="hidden grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
                 <div className="col-span-5">Libellé</div>
                 <div className="col-span-2">Date</div>
                 <div className="col-span-2">Catégorie</div>
@@ -895,19 +997,26 @@ export function CheckInForm({
               {recentIncomes.map((i) => (
                 <div
                   key={i.id}
-                  className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-1.5 text-sm"
+                  className="flex items-start justify-between gap-3 px-4 py-2.5 md:grid md:grid-cols-12 md:items-center md:gap-3 md:px-5 md:py-1.5"
                 >
-                  <div className="col-span-5 truncate font-medium">{i.label}</div>
-                  <div className="col-span-2 text-xs text-muted-foreground">
+                  <div className="min-w-0 md:col-span-5">
+                    <div className="truncate text-sm font-medium">{i.label}</div>
+                    <div className="text-[11px] text-muted-foreground md:hidden">
+                      {formatDateFR(i.date)} · {oneOffIncomeCategoryLabel[i.category] ?? i.category}
+                    </div>
+                  </div>
+                  <div className="hidden md:col-span-2 md:block md:text-xs md:text-muted-foreground">
                     {formatDateFR(i.date)}
                   </div>
-                  <div className="col-span-2 text-xs text-muted-foreground">
+                  <div className="hidden md:col-span-2 md:block md:text-xs md:text-muted-foreground">
                     {oneOffIncomeCategoryLabel[i.category] ?? i.category}
                   </div>
-                  <div className="col-span-2 text-right numeric font-medium text-[var(--color-success)]">
-                    +{formatEUR(i.amount)}
+                  <div className="shrink-0 text-right md:col-span-2">
+                    <span className="numeric text-sm font-medium tabular-nums text-[var(--color-success)]">
+                      +{formatEUR(i.amount)}
+                    </span>
                   </div>
-                  <div className="col-span-1 flex justify-end gap-1">
+                  <div className="flex shrink-0 items-center gap-1 md:col-span-1 md:justify-end">
                     <NotesPopover
                       itemLabel={i.label}
                       existingNote={i.notes}
@@ -917,20 +1026,16 @@ export function CheckInForm({
                     />
                     <Button
                       size="icon"
-                      variant="ghost"
-                      className="size-6 text-destructive hover:text-destructive"
-                      onClick={async () => {
-                        if (!confirm(`Supprimer "${i.label}" ?`)) return;
-                        await removeOneOffIncome(i.id);
-                        toast.success("Supprimé");
-                        router.refresh();
-                      }}
+                      variant={confirmDeleteId === `income:${i.id}` ? "destructive" : "ghost"}
+                      className="size-9 md:size-6"
+                      onClick={() => handleRemoveIncome(i.id, i.label)}
+                      title={confirmDeleteId === `income:${i.id}` ? "Confirmer" : "Supprimer"}
                     >
-                      <Trash2 className="size-3" />
+                      <Trash2 className="size-4 md:size-3" />
                     </Button>
                   </div>
                   {i.notes && (
-                    <div className="col-span-12">
+                    <div className="w-full md:col-span-12">
                       <InlineNote note={i.notes} />
                     </div>
                   )}
@@ -938,15 +1043,15 @@ export function CheckInForm({
               ))}
             </div>
           )}
-          <div className="border-t border-border/60 bg-muted/10 px-5 py-3">
+          <div className="border-t border-border/60 bg-muted/10 px-4 py-3 md:px-5">
             <QuickAddIncome householdId={householdId} templates={incomeTemplates} />
           </div>
           {previousMonthIncomes.length > 0 && (
-            <div className="border-t border-border/60 bg-muted/5 px-5 py-2">
+            <div className="border-t border-border/60 bg-muted/5 px-4 py-2 md:px-5">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                 Mois dernier (référence)
               </div>
-              <ul className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px]">
+              <ul className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-[11px] md:grid-cols-2">
                 {previousMonthIncomes.map((i) => (
                   <li key={i.id} className="flex items-center justify-between">
                     <span className="truncate text-muted-foreground">{i.label}</span>
@@ -959,7 +1064,7 @@ export function CheckInForm({
             </div>
           )}
 
-          {/* Dépenses récurrentes (form) */}
+          {/* Recurring expenses */}
           <SectionHeader
             icon={<Receipt className="size-3.5" />}
             title="Dépenses récurrentes"
@@ -970,12 +1075,12 @@ export function CheckInForm({
             subtitle={`baseline ${formatEUR(cashflow.totalExpense)}`}
           />
           {expenseItems.length === 0 ? (
-            <div className="px-5 py-3 text-xs text-muted-foreground">
+            <div className="px-4 py-3 text-xs text-muted-foreground md:px-5">
               Aucune dépense récurrente · ajoute-en une ci-dessous.
             </div>
           ) : (
-            <div>
-              <div className="grid grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="divide-y divide-border/40">
+              <div className="hidden grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
                 <div className="col-span-4">Libellé</div>
                 <div className="col-span-2">Catégorie</div>
                 <div className="col-span-2 text-right">Moyenne</div>
@@ -989,50 +1094,58 @@ export function CheckInForm({
                 return (
                   <div
                     key={e.id}
-                    className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-1.5 text-sm"
+                    className="px-4 py-3 md:grid md:grid-cols-12 md:items-center md:gap-3 md:px-5 md:py-1.5"
                   >
-                    <div className="col-span-4 min-w-0">
-                      <a
-                        href={`/expenses/${e.id}`}
-                        className="truncate font-medium hover:text-[var(--chart-1)] hover:underline"
-                      >
-                        {e.label}
-                      </a>
-                      {e.historyCount > 0 && (
-                        <div className="text-[10px] text-muted-foreground">
-                          {e.historyCount} mois d&apos;historique
+                    <div className="flex items-start justify-between gap-3 md:col-span-4 md:min-w-0 md:block">
+                      <div className="min-w-0">
+                        <a
+                          href={`/expenses/${e.id}`}
+                          className="truncate text-sm font-medium hover:text-[var(--chart-1)] hover:underline"
+                        >
+                          {e.label}
+                        </a>
+                        <div className="text-[11px] text-muted-foreground md:hidden">
+                          {expenseCategoryLabel[e.category] ?? e.category}
+                          {e.historyCount > 0 && ` · ${e.historyCount} mois`}
+                          {" · moy. "}
+                          {formatEUR(e.average)}
                         </div>
-                      )}
-                    </div>
-                    <div className="col-span-2 text-xs text-muted-foreground">
-                      {expenseCategoryLabel[e.category] ?? e.category}
-                    </div>
-                    <div className="col-span-2 text-right numeric text-[11px] text-muted-foreground">
-                      {formatEUR(e.average)}
-                    </div>
-                    <div className="col-span-1 text-right numeric text-[11px] text-muted-foreground">
-                      {formatEUR(e.previous)}
-                    </div>
-                    <div className="col-span-2">
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={current}
-                          onChange={(ev) =>
-                            setExpenseThisMonth((prev) => ({
-                              ...prev,
-                              [e.id]: Number(ev.target.value),
-                            }))
-                          }
-                          className="h-8 pr-6 text-right tabular-nums"
+                      </div>
+                      <div className="shrink-0 md:hidden">
+                        <NotesPopover
+                          itemLabel={e.label}
+                          existingNote={e.notes}
+                          onSave={async (note) => {
+                            await updateExpenseNote({ id: e.id, note });
+                          }}
                         />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-muted-foreground">
-                          €
-                        </span>
                       </div>
                     </div>
-                    <div className="col-span-1 flex justify-end">
+                    <div className="hidden md:col-span-2 md:block md:text-xs md:text-muted-foreground">
+                      {expenseCategoryLabel[e.category] ?? e.category}
+                    </div>
+                    <div className="hidden md:col-span-2 md:block md:text-right md:text-[11px] md:numeric md:text-muted-foreground">
+                      {formatEUR(e.average)}
+                    </div>
+                    <div className="hidden md:col-span-1 md:block md:text-right md:text-[11px] md:numeric md:text-muted-foreground">
+                      {formatEUR(e.previous)}
+                    </div>
+                    <div className="mt-2 md:col-span-2 md:mt-0">
+                      <Label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground md:hidden">
+                        Ce mois
+                      </Label>
+                      <MoneyInput
+                        value={current}
+                        onChange={(v) =>
+                          setExpenseThisMonth((prev) => ({
+                            ...prev,
+                            [e.id]: v,
+                          }))
+                        }
+                        title="Montant ce mois"
+                      />
+                    </div>
+                    <div className="hidden md:col-span-1 md:flex md:justify-end">
                       <NotesPopover
                         itemLabel={e.label}
                         existingNote={e.notes}
@@ -1043,7 +1156,7 @@ export function CheckInForm({
                     </div>
                     {Math.abs(deltaVsAvg) > 1 && (
                       <div
-                        className={`col-span-12 text-[10px] ${
+                        className={`mt-1 text-[10px] md:col-span-12 ${
                           deltaVsAvg > 0 ? "text-destructive" : "text-[var(--color-success)]"
                         }`}
                       >
@@ -1051,7 +1164,7 @@ export function CheckInForm({
                       </div>
                     )}
                     {e.notes && (
-                      <div className="col-span-12">
+                      <div className="md:col-span-12">
                         <InlineNote note={e.notes} />
                       </div>
                     )}
@@ -1060,11 +1173,11 @@ export function CheckInForm({
               })}
             </div>
           )}
-          <div className="border-t border-border/60 bg-muted/10 px-5 py-3">
+          <div className="border-t border-border/60 bg-muted/10 px-4 py-3 md:px-5">
             <QuickAddExpense householdId={householdId} />
           </div>
 
-          {/* Frais one-shot ce mois */}
+          {/* One-off charges */}
           <SectionHeader
             icon={<Receipt className="size-3.5" />}
             title="Frais one-shot ce mois"
@@ -1074,12 +1187,12 @@ export function CheckInForm({
             dotColor="var(--destructive)"
           />
           {recentCharges.length === 0 ? (
-            <div className="px-5 py-3 text-xs text-muted-foreground">
+            <div className="px-4 py-3 text-xs text-muted-foreground md:px-5">
               Aucun frais ce mois. Utilise un modèle ou ajoute-en un nouveau ci-dessous.
             </div>
           ) : (
-            <div>
-              <div className="grid grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <div className="divide-y divide-border/40">
+              <div className="hidden grid-cols-12 gap-3 border-b border-border/60 bg-muted/20 px-5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground md:grid">
                 <div className="col-span-5">Libellé</div>
                 <div className="col-span-2">Date</div>
                 <div className="col-span-2">Catégorie</div>
@@ -1089,19 +1202,26 @@ export function CheckInForm({
               {recentCharges.map((c) => (
                 <div
                   key={c.id}
-                  className="grid grid-cols-12 items-center gap-3 border-t border-border/40 px-5 py-1.5 text-sm"
+                  className="flex items-start justify-between gap-3 px-4 py-2.5 md:grid md:grid-cols-12 md:items-center md:gap-3 md:px-5 md:py-1.5"
                 >
-                  <div className="col-span-5 truncate font-medium">{c.label}</div>
-                  <div className="col-span-2 text-xs text-muted-foreground">
+                  <div className="min-w-0 md:col-span-5">
+                    <div className="truncate text-sm font-medium">{c.label}</div>
+                    <div className="text-[11px] text-muted-foreground md:hidden">
+                      {formatDateFR(c.date)} · {chargeCategoryLabel[c.category] ?? c.category}
+                    </div>
+                  </div>
+                  <div className="hidden md:col-span-2 md:block md:text-xs md:text-muted-foreground">
                     {formatDateFR(c.date)}
                   </div>
-                  <div className="col-span-2 text-xs text-muted-foreground">
+                  <div className="hidden md:col-span-2 md:block md:text-xs md:text-muted-foreground">
                     {chargeCategoryLabel[c.category] ?? c.category}
                   </div>
-                  <div className="col-span-2 text-right numeric font-medium text-destructive">
-                    -{formatEUR(c.amount)}
+                  <div className="shrink-0 text-right md:col-span-2">
+                    <span className="numeric text-sm font-medium tabular-nums text-destructive">
+                      -{formatEUR(c.amount)}
+                    </span>
                   </div>
-                  <div className="col-span-1 flex justify-end gap-1">
+                  <div className="flex shrink-0 items-center gap-1 md:col-span-1 md:justify-end">
                     <NotesPopover
                       itemLabel={c.label}
                       existingNote={c.notes}
@@ -1111,20 +1231,16 @@ export function CheckInForm({
                     />
                     <Button
                       size="icon"
-                      variant="ghost"
-                      className="size-6 text-destructive hover:text-destructive"
-                      onClick={async () => {
-                        if (!confirm(`Supprimer "${c.label}" ?`)) return;
-                        await removeCharge(c.id);
-                        toast.success("Supprimé");
-                        router.refresh();
-                      }}
+                      variant={confirmDeleteId === `charge:${c.id}` ? "destructive" : "ghost"}
+                      className="size-9 md:size-6"
+                      onClick={() => handleRemoveCharge(c.id, c.label)}
+                      title={confirmDeleteId === `charge:${c.id}` ? "Confirmer" : "Supprimer"}
                     >
-                      <Trash2 className="size-3" />
+                      <Trash2 className="size-4 md:size-3" />
                     </Button>
                   </div>
                   {c.notes && (
-                    <div className="col-span-12">
+                    <div className="w-full md:col-span-12">
                       <InlineNote note={c.notes} />
                     </div>
                   )}
@@ -1132,15 +1248,15 @@ export function CheckInForm({
               ))}
             </div>
           )}
-          <div className="border-t border-border/60 bg-muted/10 px-5 py-3">
+          <div className="border-t border-border/60 bg-muted/10 px-4 py-3 md:px-5">
             <QuickAddCharge householdId={householdId} templates={chargeTemplates} />
           </div>
           {previousMonthCharges.length > 0 && (
-            <div className="border-t border-border/60 bg-muted/5 px-5 py-2">
+            <div className="border-t border-border/60 bg-muted/5 px-4 py-2 md:px-5">
               <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
                 Mois dernier (référence)
               </div>
-              <ul className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px]">
+              <ul className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-[11px] md:grid-cols-2">
                 {previousMonthCharges.map((c) => (
                   <li key={c.id} className="flex items-center justify-between">
                     <span className="truncate text-muted-foreground">{c.label}</span>
@@ -1154,34 +1270,77 @@ export function CheckInForm({
           )}
         </div>
 
-        <div className="flex flex-wrap items-end justify-between gap-4 border-t border-border bg-muted/20 px-5 py-4">
-          <div className="min-w-[240px] flex-1">
+        {/* Footer: note + totals (desktop) */}
+        <div className="flex flex-col gap-4 border-t border-border bg-muted/20 px-4 py-4 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-4 md:px-5">
+          <div className="flex-1">
             <Label className="text-xs text-muted-foreground">Note du mois (optionnel)</Label>
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               placeholder="Ex. prime perçue, virement exceptionnel, bonus…"
+              className="mt-1 text-base md:text-sm"
             />
           </div>
           <div className="rounded-lg border border-border bg-card p-4 text-right">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
               Nouveau patrimoine net
             </div>
-            <div className="numeric mt-1 text-xl font-semibold">{formatEUR(totals.net)}</div>
+            <div className="numeric mt-1 text-2xl font-semibold tabular-nums md:text-xl">
+              {formatEUR(totals.net)}
+            </div>
             <div className="mt-1 text-[11px] text-muted-foreground">
               actifs {formatEUR(totals.assets)} · passifs {formatEUR(totals.liabilities)}
             </div>
           </div>
         </div>
       </section>
+
+      {/* ---- STICKY SUBMIT BAR — mobile only, honors safe-area ---- */}
+      <div
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 px-4 pb-[max(env(safe-area-inset-bottom,0px),0.75rem)] pt-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.2)] backdrop-blur supports-backdrop-filter:bg-background/80 md:hidden"
+        style={{ bottom: "var(--mobile-nav-h, 0px)" }}
+      >
+        <div className="mb-2 flex items-baseline justify-between gap-3 text-xs">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Net à enregistrer
+            </div>
+            <div className="numeric truncate text-lg font-semibold tabular-nums">
+              {formatEUR(totals.net)}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Δ mois</div>
+            <DeltaPill value={deltaNet} />
+          </div>
+        </div>
+        <Button
+          onClick={submit}
+          disabled={pending}
+          className="h-12 w-full text-base font-semibold"
+        >
+          <Save className="size-4" />
+          {pending ? "Enregistrement…" : `Enregistrer ${monthLabel}`}
+        </Button>
+      </div>
+
+      {/* Desktop submit (always visible in the header was moved here for clarity) */}
+      <div className="hidden md:block">
+        <div className="sticky bottom-4 flex justify-end">
+          <Button onClick={submit} disabled={pending} size="lg">
+            <Save className="size-4" />
+            {pending ? "Enregistrement…" : `Enregistrer ${monthLabel}`}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 
 function SectionHeader({
   icon,
@@ -1208,21 +1367,21 @@ function SectionHeader({
         : "";
   const sign = tone === "negative" ? "-" : tone === "positive" ? "+" : "";
   return (
-    <div className="flex items-center justify-between border-y border-border bg-muted/30 px-5 py-2.5">
-      <div className="flex items-center gap-3">
-        <span className="size-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
-        {icon && <span className="text-muted-foreground">{icon}</span>}
-        <h3 className="text-sm font-semibold">{title}</h3>
+    <div className="flex items-center justify-between border-y border-border bg-muted/30 px-4 py-2.5 md:px-5">
+      <div className="flex min-w-0 items-center gap-2 md:gap-3">
+        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: dotColor }} />
+        {icon && <span className="shrink-0 text-muted-foreground">{icon}</span>}
+        <h3 className="truncate text-sm font-semibold">{title}</h3>
         {count != null && (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="shrink-0 text-[10px]">
             {count}
           </Badge>
         )}
         {subtitle && (
-          <span className="text-[10px] text-muted-foreground">· {subtitle}</span>
+          <span className="hidden text-[10px] text-muted-foreground md:inline">· {subtitle}</span>
         )}
       </div>
-      <div className={`numeric text-sm font-semibold ${toneClass}`}>
+      <div className={`numeric shrink-0 text-sm font-semibold tabular-nums ${toneClass}`}>
         {total !== 0 && sign}
         {formatEUR(total)}
       </div>
@@ -1260,8 +1419,8 @@ function DCAEditor({
     currentDCA != null && currentDCA > 0 ? `DCA ${formatEUR(currentDCA)}/mois` : "+ Définir DCA";
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
         render={
           <button
             type="button"
@@ -1275,21 +1434,23 @@ function DCAEditor({
         }
       >
         {label}
-      </DialogTrigger>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Ajuster le DCA mensuel</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-2">
+      </SheetTrigger>
+      <SheetContent desktopSize="md:max-w-sm">
+        <SheetHeader>
+          <SheetTitle>Ajuster le DCA mensuel</SheetTitle>
+        </SheetHeader>
+        <SheetBody className="grid gap-3">
           <Label className="text-xs text-muted-foreground">Apport mensuel (EUR)</Label>
           <div className="relative">
             <Input
               type="number"
               step="1"
+              inputMode="decimal"
+              pattern="[0-9]*[.,]?[0-9]*"
               placeholder="ex. 300"
               value={amount}
               onChange={(e) => setAmount(e.target.value === "" ? "" : Number(e.target.value))}
-              className="pr-8 text-right numeric"
+              className="h-12 pr-9 text-right tabular-nums numeric text-lg md:h-8 md:text-sm md:pr-8"
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
               €
@@ -1298,8 +1459,8 @@ function DCAEditor({
           <p className="text-[11px] text-muted-foreground">
             Le DCA est modifiable à tout moment — pas un engagement rigide. Vide = pas de DCA.
           </p>
-        </div>
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
+        </SheetBody>
+        <SheetFooter className="flex items-center justify-between md:justify-between">
           <Button
             variant="ghost"
             size="sm"
@@ -1320,66 +1481,23 @@ function DCAEditor({
           >
             Retirer
           </Button>
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+          <div className="flex flex-1 justify-end gap-2 md:flex-none">
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+              className="flex-1 md:flex-none"
+            >
               Annuler
             </Button>
-            <Button onClick={submit} disabled={pending}>
+            <Button onClick={submit} disabled={pending} className="flex-1 md:flex-none">
               {pending ? "…" : "Enregistrer"}
             </Button>
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
-}
-
-function Panel({
-  title,
-  icon,
-  total,
-  subtitle,
-  tone,
-  children,
-  footer,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  total: number;
-  subtitle?: string;
-  tone?: "positive" | "negative";
-  children: React.ReactNode;
-  footer?: React.ReactNode;
-}) {
-  const toneClass =
-    tone === "positive"
-      ? "text-[var(--color-success)]"
-      : tone === "negative"
-        ? "text-destructive"
-        : "";
-  return (
-    <div className="flex flex-col rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          {icon && <span className="text-muted-foreground">{icon}</span>}
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {subtitle && (
-            <span className="text-[10px] text-muted-foreground">· {subtitle}</span>
-          )}
-        </div>
-        <div className={`numeric text-sm font-semibold ${toneClass}`}>
-          {tone === "negative" && total > 0 ? "-" : ""}
-          {formatEUR(total)}
-        </div>
-      </div>
-      <div className="flex-1 px-4 py-2">{children}</div>
-      {footer && <div className="border-t border-border/60 bg-muted/10 px-4 py-2">{footer}</div>}
-    </div>
-  );
-}
-
-function EmptyHint({ children }: { children: React.ReactNode }) {
-  return <p className="py-3 text-center text-[11px] text-muted-foreground">{children}</p>;
 }
 
 function Kpi({
@@ -1397,10 +1515,14 @@ function Kpi({
 }) {
   const tone = positive ? "text-[var(--color-success)]" : negative ? "text-destructive" : "";
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`numeric mt-1.5 text-lg font-semibold ${tone}`}>{value}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
+    <div className="rounded-xl border border-border bg-card p-3 md:p-4">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground md:text-[11px]">
+        {label}
+      </div>
+      <div className={`numeric mt-1 text-base font-semibold tabular-nums md:mt-1.5 md:text-lg ${tone}`}>
+        {value}
+      </div>
+      {hint && <div className="mt-0.5 hidden text-[11px] text-muted-foreground md:block">{hint}</div>}
     </div>
   );
 }
@@ -1422,19 +1544,14 @@ function DeltaPill({
       </span>
     );
   }
-  // "Favorable" depends on whether this row is a liability context.
-  // - Asset: value > 0 = good (balance went up).
-  // - Liability (invertColors): value < 0 = good (debt went down).
   const favorable = invertColors ? value < 0 : value > 0;
-  // For liabilities, flip the displayed sign so that a good outcome shows +X (green)
-  // and a bad outcome shows -X (red) — the "-" sign always means bad.
   const displayValue = invertColors ? -value : value;
   const tone = favorable ? "text-[var(--color-success)]" : "text-destructive";
   const Icon = displayValue > 0 ? TrendingUp : TrendingDown;
   return (
     <span className={`inline-flex items-center gap-1 ${tone}`}>
       <Icon className={small ? "size-3" : "size-3.5"} />
-      <span className={`numeric ${small ? "text-[11px]" : "text-xs"}`}>
+      <span className={`numeric tabular-nums ${small ? "text-[11px]" : "text-xs"}`}>
         {formatEUR(displayValue, { signed: true })}
       </span>
     </span>
