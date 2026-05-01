@@ -20,6 +20,7 @@ import {
   ChevronRight,
   X,
   Coins,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +50,7 @@ const SECONDARY: NavItem[] = [
   { href: "/real-estate", label: "Immobilier", icon: Home },
   { href: "/charges", label: "Frais one-shot", icon: CircleDollarSign },
   { href: "/projections", label: "Projections", icon: LineChart },
+  { href: "/banking", label: "Banques", icon: Building2 },
   { href: "/snapshots", label: "Historique", icon: History },
   { href: "/settings", label: "Paramètres", icon: Settings },
 ];
@@ -64,6 +66,7 @@ const TITLE_BY_SEGMENT: Record<string, string> = {
   investments: "Investissements",
   "real-estate": "Immobilier",
   projections: "Projections",
+  banking: "Banques",
   snapshots: "Historique",
   settings: "Paramètres",
   onboarding: "Bienvenue",

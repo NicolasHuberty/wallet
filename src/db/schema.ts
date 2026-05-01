@@ -144,9 +144,17 @@ export const account = pgTable(
     monthlyContribution: real("monthly_contribution"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     notes: text("notes"),
+    // GoCardless / open-banking link. When set, the account is auto-synced
+    // from the bank instead of being manually edited.
+    goCardlessAccountId: text("gocardless_account_id"),
+    bankConnectionId: text("bank_connection_id"),
+    lastBankSyncAt: timestamp("last_bank_sync_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [index("account_household_id_idx").on(t.householdId)],
+  (t) => [
+    index("account_household_id_idx").on(t.householdId),
+    index("account_gocardless_id_idx").on(t.goCardlessAccountId),
+  ],
 );
 
 export const holding = pgTable(
@@ -483,7 +491,12 @@ export const cashflowKind = [
 ] as const;
 export type CashflowKind = (typeof cashflowKind)[number];
 
-export const cashflowSource = ["revolut_import", "manual", "checkin"] as const;
+export const cashflowSource = [
+  "revolut_import",
+  "manual",
+  "checkin",
+  "bank_sync",
+] as const;
 export type CashflowSource = (typeof cashflowSource)[number];
 
 export const accountCashflow = pgTable(
@@ -503,12 +516,45 @@ export const accountCashflow = pgTable(
     ticker: text("ticker"),
     notes: text("notes"),
     source: text("source", { enum: cashflowSource }).notNull().default("manual"),
+    // Provider-side ID for de-duplication on re-sync (eg. GoCardless
+    // transactionId, Revolut transaction ref).
+    externalId: text("external_id"),
     ...timestamps,
   },
   (t) => [
     index("account_cashflow_account_id_date_idx").on(t.accountId, t.date),
     index("account_cashflow_account_id_source_idx").on(t.accountId, t.source),
+    index("account_cashflow_external_id_idx").on(t.externalId),
   ],
+);
+
+// One row per GoCardless requisition (bank connection). PSD2-mandated
+// re-consent at most every 90 days, so each connection has an `expiresAt`.
+export const bankConnectionStatus = ["pending", "active", "expired", "error"] as const;
+
+export const bankConnection = pgTable(
+  "bank_connection",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    institutionId: text("institution_id").notNull(),
+    institutionName: text("institution_name").notNull(),
+    institutionLogo: text("institution_logo"),
+    requisitionId: text("requisition_id").notNull().unique(),
+    agreementId: text("agreement_id"),
+    // Free-form reference we set when creating the requisition so we can
+    // recognise the user on the OAuth callback even before we know the
+    // requisition_id (the GoCardless redirect only sends `?ref=`).
+    reference: text("reference").notNull().unique(),
+    status: text("status", { enum: bankConnectionStatus }).notNull().default("pending"),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (t) => [index("bank_connection_household_id_idx").on(t.householdId)],
 );
 
 export const netWorthSnapshot = pgTable(

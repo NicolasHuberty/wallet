@@ -270,6 +270,26 @@ export async function getFutureAmortizationByLoanAccount(
   return out;
 }
 
+export async function getBankConnections(householdId: string) {
+  const conns = await db
+    .select()
+    .from(schema.bankConnection)
+    .where(eq(schema.bankConnection.householdId, householdId))
+    .orderBy(asc(schema.bankConnection.createdAt));
+  if (conns.length === 0) return [];
+  const accs = await db
+    .select()
+    .from(schema.account)
+    .where(eq(schema.account.householdId, householdId));
+  const accsByConn = new Map<string, typeof accs>();
+  for (const a of accs) {
+    if (!a.bankConnectionId) continue;
+    if (!accsByConn.has(a.bankConnectionId)) accsByConn.set(a.bankConnectionId, []);
+    accsByConn.get(a.bankConnectionId)!.push(a);
+  }
+  return conns.map((c) => ({ connection: c, linkedAccounts: accsByConn.get(c.id) ?? [] }));
+}
+
 export async function getRealEstateAppreciationByAccount(
   householdId: string,
 ): Promise<Record<string, number>> {

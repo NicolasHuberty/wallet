@@ -14,6 +14,7 @@ import {
   History,
   CircleDollarSign,
   ClipboardCheck,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,7 @@ const items = [
   { href: "/expenses", label: "Dépenses & revenus", icon: Receipt },
   { href: "/charges", label: "Frais one-shot", icon: CircleDollarSign },
   { href: "/projections", label: "Projections", icon: LineChart },
+  { href: "/banking", label: "Banques", icon: Building2 },
   { href: "/snapshots", label: "Historique", icon: History },
 ];
 
