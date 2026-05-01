@@ -2,6 +2,7 @@
 
 import { db, schema } from "@/db";
 import { and, eq, inArray, lte, gte, isNull, sql } from "drizzle-orm";
+import { chargeCategory } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -764,6 +765,123 @@ export async function setCashflowCategoryWithRule(
 
   revalidatePath(`/accounts/${row.accountId}`);
   return { ruleId, bulkUpdated };
+}
+
+// ─── Create a one-off charge from a cashflow + link them ────────────
+// Useful when an unexpected expense lands on the bank feed (taxes,
+// notary fees, fines…) and the user wants to record it as an
+// exceptional charge rather than a category. Auto-fills amount + date
+// from the cashflow.
+
+const createChargeSchema = z.object({
+  cashflowId: z.string().min(1),
+  label: z.string().min(1),
+  // Free-form category — accepts both chargeCategory presets and user-
+  // defined strings, matching the existing oneOffCharge schema.
+  category: z.string().min(1),
+  includeInCostBasis: z.boolean().default(false),
+  propertyId: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+export async function createOneOffChargeFromCashflow(
+  values: z.infer<typeof createChargeSchema>,
+) {
+  assertWritable();
+  const p = createChargeSchema.parse(values);
+  const h = await getPrimaryHousehold();
+
+  const [cf] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      amount: schema.accountCashflow.amount,
+      date: schema.accountCashflow.date,
+      notes: schema.accountCashflow.notes,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  if (!cf || cf.householdId !== h.id) throw new Error("Mouvement introuvable");
+
+  // Validate property ownership when one is supplied
+  if (p.propertyId) {
+    const [prop] = await db
+      .select({
+        id: schema.property.id,
+        accountId: schema.property.accountId,
+      })
+      .from(schema.property)
+      .where(eq(schema.property.id, p.propertyId));
+    if (!prop) throw new Error("Bien introuvable");
+    const [acc] = await db
+      .select({ householdId: schema.account.householdId })
+      .from(schema.account)
+      .where(eq(schema.account.id, prop.accountId));
+    if (!acc || acc.householdId !== h.id) throw new Error("Bien introuvable");
+  }
+
+  const amount = Math.abs(cf.amount);
+  const date = cf.date as unknown as Date;
+  const [created] = await db
+    .insert(schema.oneOffCharge)
+    .values({
+      householdId: h.id,
+      date,
+      label: p.label,
+      category: p.category,
+      amount,
+      propertyId: p.propertyId || null,
+      includeInCostBasis: p.includeInCostBasis,
+      notes: p.notes || cf.notes,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  // Map the charge category to one of our transaction categories. Most
+  // charge categories map to "tax" or "fees_bank" or "housing" — a
+  // pragmatic best-effort. Falls back to existing if unknown.
+  const txCategory: TransactionCategory = (() => {
+    switch (p.category) {
+      case "notary":
+      case "registration_tax":
+      case "tax":
+      case "inheritance_tax":
+        return "tax";
+      case "credit_fees":
+      case "mortgage_insurance":
+        return "fees_bank";
+      case "renovation":
+      case "furniture":
+      case "moving":
+      case "expertise":
+        return "housing";
+      case "legal":
+        return "fees_bank";
+      default:
+        return "other_expense";
+    }
+  })();
+
+  await db
+    .update(schema.accountCashflow)
+    .set({
+      category: txCategory,
+      categorySource: "user",
+      linkedOneOffChargeId: created.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.accountCashflow.id, cf.id));
+
+  revalidatePath(`/accounts/${cf.accountId}`);
+  revalidatePath("/charges");
+  return { chargeId: created.id, label: created.label };
+}
+
+// Convenience: list charge category presets for the UI picker
+export async function listChargeCategoryOptions() {
+  return chargeCategory.map((c) => c);
 }
 
 // ─── Manually link a cashflow to a BCE company ───────────────────────

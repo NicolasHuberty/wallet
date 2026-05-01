@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Building2, CheckCircle2, Search, Sparkles } from "lucide-react";
+import { Building2, CheckCircle2, Search, Sparkles, Receipt, Plus } from "lucide-react";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import {
   categoryColor,
@@ -30,10 +30,13 @@ import {
   transactionCategory,
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
+import { chargeCategory } from "@/db/schema";
+import { chargeCategoryLabel } from "@/lib/labels";
 import {
   setCashflowCategoryWithRule,
   linkCashflowToBce,
   searchBceCompanies,
+  createOneOffChargeFromCashflow,
 } from "@/app/banking/actions";
 
 type Cashflow = {
@@ -82,6 +85,10 @@ export function TransactionEditDialog({
   householdAccounts = [],
   householdCharges = [],
   householdIncomes = [],
+  // When set, the dialog opens with the "create one-off charge" form
+  // already expanded — the wizard uses this to send the user straight
+  // to the form for an unexpected expense.
+  initialCreateChargeOpen = false,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -89,6 +96,7 @@ export function TransactionEditDialog({
   householdAccounts?: HouseholdAccountOption[];
   householdCharges?: OneOffChargeOption[];
   householdIncomes?: RecurringIncomeOption[];
+  initialCreateChargeOpen?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -111,6 +119,10 @@ export function TransactionEditDialog({
   const [bceCandidates, setBceCandidates] = useState<BceCandidate[]>([]);
   const [bceSearching, setBceSearching] = useState(false);
   const [showBce, setShowBce] = useState(false);
+  const [showCreateCharge, setShowCreateCharge] = useState(initialCreateChargeOpen);
+  const [chargeLabel, setChargeLabel] = useState("");
+  const [chargeCategoryValue, setChargeCategoryValue] = useState<string>("tax");
+  const [chargeIncludeInCostBasis, setChargeIncludeInCostBasis] = useState(false);
 
   useEffect(() => {
     if (cashflow?.category) setCategory(cashflow.category as TransactionCategory);
@@ -121,12 +133,18 @@ export function TransactionEditDialog({
     setBceQuery("");
     setBceCandidates([]);
     setShowBce(false);
+    setShowCreateCharge(initialCreateChargeOpen);
+    setChargeLabel(cashflow?.notes?.slice(0, 120) ?? "");
+    setChargeCategoryValue("tax");
+    setChargeIncludeInCostBasis(false);
   }, [
     cashflow?.id,
     cashflow?.category,
+    cashflow?.notes,
     cashflow?.transferToAccountId,
     cashflow?.linkedOneOffChargeId,
     cashflow?.linkedRecurringIncomeId,
+    initialCreateChargeOpen,
   ]);
 
   // Debounced BCE search
@@ -169,6 +187,29 @@ export function TransactionEditDialog({
             `Catégorie mise à jour · ${r.bulkUpdated} transactions similaires reclassées${r.ruleId ? " · règle créée" : ""}`,
           );
         else toast.success("Catégorie mise à jour");
+        onOpenChange(false);
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
+  function createCharge() {
+    if (!cashflow) return;
+    if (!chargeLabel.trim()) {
+      toast.error("Donne un libellé au frais");
+      return;
+    }
+    start(async () => {
+      try {
+        const r = await createOneOffChargeFromCashflow({
+          cashflowId: cashflow.id,
+          label: chargeLabel.trim(),
+          category: chargeCategoryValue,
+          includeInCostBasis: chargeIncludeInCostBasis,
+        });
+        toast.success(`Frais créé · ${r.label}`);
         onOpenChange(false);
         router.refresh();
       } catch (e) {
@@ -351,46 +392,128 @@ export function TransactionEditDialog({
             </div>
           </div>
 
-          {/* Linked one-off charge — only when current row is an expense */}
-          {cashflow.amount < 0 && householdCharges.length > 0 && (
+          {/* Linked / new one-off charge — visible on expense rows */}
+          {cashflow.amount < 0 && (
             <div className="rounded-lg border border-border p-3">
-              <Label className="text-xs font-semibold">Lier à un frais one-shot</Label>
+              <div className="flex items-baseline justify-between">
+                <Label className="text-xs font-semibold">
+                  <Receipt className="mr-1 inline size-3.5" /> Frais exceptionnel (one-shot)
+                </Label>
+                {!showCreateCharge && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[10px]"
+                    onClick={() => setShowCreateCharge(true)}
+                  >
+                    <Plus className="size-3" /> Créer
+                  </Button>
+                )}
+              </div>
               <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Si cette dépense correspond à un frais que tu as déjà enregistré (notaire,
-                expertise, droits d&apos;enregistrement…), choisis-le pour les rapprocher.
+                Lier à un frais déjà enregistré OU créer un nouveau frais à partir de cette
+                transaction (utile pour taxes, frais notaire, dépenses imprévues…).
               </p>
-              <Select
-                value={linkedCharge ?? "none"}
-                onValueChange={(v) => setLinkedCharge(v && v !== "none" ? v : null)}
-              >
-                <SelectTrigger className="mt-2 h-9">
-                  <SelectValue placeholder="Aucun lien" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— Aucun frais lié —</SelectItem>
-                  {householdCharges
-                    .map((c) => {
-                      const dateStr = c.date ? new Date(c.date).toLocaleDateString("fr-BE") : "";
-                      const amountClose =
-                        Math.abs(Math.abs(c.amount) - Math.abs(cashflow.amount)) /
-                          Math.abs(cashflow.amount) <
-                        0.05;
-                      return { c, dateStr, amountClose };
-                    })
-                    .sort((a, b) => Number(b.amountClose) - Number(a.amountClose))
-                    .map(({ c, dateStr, amountClose }) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        <span className="flex items-baseline gap-2">
-                          {amountClose && <span className="text-[10px]">⭐</span>}
-                          <span className="font-medium">{c.label}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {formatEUR(c.amount)} · {dateStr}
+
+              {householdCharges.length > 0 && (
+                <Select
+                  value={linkedCharge ?? "none"}
+                  onValueChange={(v) => setLinkedCharge(v && v !== "none" ? v : null)}
+                >
+                  <SelectTrigger className="mt-2 h-9">
+                    <SelectValue placeholder="Aucun lien" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Aucun frais lié —</SelectItem>
+                    {householdCharges
+                      .map((c) => {
+                        const dateStr = c.date
+                          ? new Date(c.date).toLocaleDateString("fr-BE")
+                          : "";
+                        const amountClose =
+                          Math.abs(Math.abs(c.amount) - Math.abs(cashflow.amount)) /
+                            Math.abs(cashflow.amount) <
+                          0.05;
+                        return { c, dateStr, amountClose };
+                      })
+                      .sort((a, b) => Number(b.amountClose) - Number(a.amountClose))
+                      .map(({ c, dateStr, amountClose }) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          <span className="flex items-baseline gap-2">
+                            {amountClose && <span className="text-[10px]">⭐</span>}
+                            <span className="font-medium">{c.label}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {formatEUR(c.amount)} · {dateStr}
+                            </span>
                           </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {showCreateCharge && (
+                <div className="mt-3 space-y-2 rounded-md border border-dashed border-border bg-muted/20 p-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground">
+                    Nouveau frais — montant {formatEUR(Math.abs(cashflow.amount))} · date{" "}
+                    {formatDateFR(cashflow.date)}
+                  </p>
+                  <div className="grid gap-2">
+                    <Label className="text-[10px]">Libellé</Label>
+                    <Input
+                      value={chargeLabel}
+                      onChange={(e) => setChargeLabel(e.target.value)}
+                      placeholder="ex. Précompte immobilier 2026"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label className="text-[10px]">Catégorie de frais</Label>
+                    <Select
+                      value={chargeCategoryValue}
+                      onValueChange={(v) => setChargeCategoryValue(v ?? "other")}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {chargeCategory.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {chargeCategoryLabel[c] ?? c}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2 text-[10px]">
+                    <input
+                      type="checkbox"
+                      checked={chargeIncludeInCostBasis}
+                      onChange={(e) => setChargeIncludeInCostBasis(e.target.checked)}
+                    />
+                    <span>Inclure dans le coût de revient (immo)</span>
+                  </label>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowCreateCharge(false)}
+                      disabled={pending}
+                      className="flex-1 h-8 text-xs"
+                    >
+                      Annuler
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={createCharge}
+                      disabled={pending}
+                      className="flex-1 h-8 text-xs"
+                    >
+                      <Plus className="size-3" /> Créer + lier
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

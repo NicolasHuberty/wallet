@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, SkipForward } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, SkipForward, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import {
@@ -165,6 +165,9 @@ function ReviewWizard({
   const [idx, setIdx] = useState(0);
   const [pending, start] = useTransition();
   const [advanced, setAdvanced] = useState(false);
+  // When true, the underlying TransactionEditDialog opens with the
+  // "create one-off charge" form already expanded.
+  const [advancedCreateCharge, setAdvancedCreateCharge] = useState(false);
   const current = rows[idx];
 
   function advance() {
@@ -418,11 +421,41 @@ function ReviewWizard({
               </div>
             </div>
 
+            {/* Exceptional charge shortcut — only on negative rows */}
+            {current.amount < 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+                <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                  <Receipt className="size-3.5" />
+                  C&apos;est une dépense exceptionnelle (taxes, frais notaire, dépenses imprévues
+                  importantes) ?
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setAdvancedCreateCharge(true);
+                    setAdvanced(true);
+                  }}
+                  disabled={pending}
+                >
+                  + Créer un frais one-shot
+                </Button>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
               <span>
-                Besoin de lier à une société BCE ou de choisir une autre catégorie ?
+                Besoin de lier à une société BCE, à un frais existant ou de choisir une autre
+                catégorie ?
               </span>
-              <Button size="sm" variant="outline" onClick={() => setAdvanced(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAdvancedCreateCharge(false);
+                  setAdvanced(true);
+                }}
+              >
                 Plus d&apos;options
               </Button>
             </div>
@@ -451,12 +484,16 @@ function ReviewWizard({
         open={advanced}
         onOpenChange={(o) => {
           setAdvanced(o);
-          if (!o) advance();
+          if (!o) {
+            setAdvancedCreateCharge(false);
+            advance();
+          }
         }}
         cashflow={current}
         householdAccounts={householdAccounts}
         householdCharges={householdCharges}
         householdIncomes={householdIncomes}
+        initialCreateChargeOpen={advancedCreateCharge}
       />
     </>
   );
