@@ -1,5 +1,5 @@
 import { db, schema } from "@/db";
-import { eq, asc, and, gt, lt, inArray } from "drizzle-orm";
+import { eq, asc, and, gt, gte, lt, inArray } from "drizzle-orm";
 import { headers } from "next/headers";
 import { isLiability } from "./labels";
 import { auth } from "./auth";
@@ -222,6 +222,68 @@ export async function getAccountCashflows(accountId: string) {
     .from(schema.accountCashflow)
     .where(eq(schema.accountCashflow.accountId, accountId))
     .orderBy(asc(schema.accountCashflow.date));
+}
+
+// Amortization rows for all mortgages of a household, dated AFTER `since`.
+// Returned grouped by accountId (the loan account, not the mortgage id).
+// Used by the projection simulator so loans decay along the real schedule.
+export async function getFutureAmortizationByLoanAccount(
+  householdId: string,
+  since: Date = new Date(),
+): Promise<Record<string, { dueDate: Date; payment: number; principal: number; interest: number; balance: number }[]>> {
+  const loanAccounts = await db
+    .select()
+    .from(schema.account)
+    .where(and(eq(schema.account.householdId, householdId), eq(schema.account.kind, "loan")));
+  if (loanAccounts.length === 0) return {};
+  const loanIds = loanAccounts.map((a) => a.id);
+  const mortgages = await db
+    .select()
+    .from(schema.mortgage)
+    .where(inArray(schema.mortgage.accountId, loanIds));
+  if (mortgages.length === 0) return {};
+  const mortgageIds = mortgages.map((m) => m.id);
+  const rows = await db
+    .select()
+    .from(schema.amortizationEntry)
+    .where(
+      and(
+        inArray(schema.amortizationEntry.mortgageId, mortgageIds),
+        gte(schema.amortizationEntry.dueDate, since),
+      ),
+    )
+    .orderBy(asc(schema.amortizationEntry.dueDate));
+  const accountIdByMortgage = new Map(mortgages.map((m) => [m.id, m.accountId]));
+  const out: Record<string, { dueDate: Date; payment: number; principal: number; interest: number; balance: number }[]> = {};
+  for (const r of rows) {
+    const accId = accountIdByMortgage.get(r.mortgageId);
+    if (!accId) continue;
+    if (!out[accId]) out[accId] = [];
+    out[accId].push({
+      dueDate: r.dueDate as unknown as Date,
+      payment: r.payment,
+      principal: r.principal,
+      interest: r.interest,
+      balance: r.balance,
+    });
+  }
+  return out;
+}
+
+export async function getRealEstateAppreciationByAccount(
+  householdId: string,
+): Promise<Record<string, number>> {
+  const accs = await getAccounts(householdId);
+  const realEstateAccs = accs.filter((a) => a.kind === "real_estate");
+  if (realEstateAccs.length === 0) return {};
+  const accIds = realEstateAccs.map((a) => a.id);
+  const properties = await db
+    .select()
+    .from(schema.property)
+    .where(inArray(schema.property.accountId, accIds));
+  const out: Record<string, number> = {};
+  for (const p of properties) out[p.accountId] = p.annualAppreciationPct;
+  return out;
 }
 
 /**
