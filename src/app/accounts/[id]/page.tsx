@@ -193,7 +193,11 @@ export default async function AccountDetailPage({
         </section>
 
         {perfReport && (
-          <InvestmentPerfPanel report={perfReport} annualYieldPct={acc.annualYieldPct} />
+          <InvestmentPerfPanel
+            report={perfReport}
+            annualYieldPct={acc.annualYieldPct}
+            cashflowCount={cashflows.length}
+          />
         )}
 
         <section className="rounded-xl border border-border bg-card p-4 md:p-5">

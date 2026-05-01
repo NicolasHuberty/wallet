@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Info, ChevronDown } from "lucide-react";
+import { Info, ChevronDown, AlertTriangle } from "lucide-react";
 import { formatEUR } from "@/lib/format";
 import {
   Tooltip,
@@ -15,6 +15,7 @@ import type { PerfReport } from "@/lib/performance";
 type Props = {
   report: PerfReport;
   annualYieldPct: number | null;
+  cashflowCount: number;
 };
 
 const fmtPct = (x: number | null, opts: { signed?: boolean } = {}) => {
@@ -24,12 +25,22 @@ const fmtPct = (x: number | null, opts: { signed?: boolean } = {}) => {
   return `${sign}${v.toFixed(2)} %`;
 };
 
-export function InvestmentPerfPanel({ report, annualYieldPct }: Props) {
+export function InvestmentPerfPanel({ report, annualYieldPct, cashflowCount }: Props) {
   const [explainerOpen, setExplainerOpen] = useState(false);
 
+  // Sanity gate: when no external cashflows have been recorded for this
+  // account, dépôts nets / plus-value / TWR / XIRR are mathematically
+  // meaningless (TWR collapses to "snapshots ratio" and inflates with each
+  // deposit, plus-value pretends every euro is gain). We blank them and
+  // surface a clear banner instead of showing an absurd number.
+  const hasExternalCfs = report.deposits > 0 || report.withdrawals > 0;
+  const showPerfNumbers = hasExternalCfs;
+  const twrAnnualizedShown = showPerfNumbers ? report.twrAnnualized : null;
+  const xirrShown = showPerfNumbers ? report.xirr : null;
+
   const twrVsYield =
-    report.twrAnnualized != null && annualYieldPct != null
-      ? report.twrAnnualized - annualYieldPct / 100
+    twrAnnualizedShown != null && annualYieldPct != null
+      ? twrAnnualizedShown - annualYieldPct / 100
       : null;
 
   return (
@@ -47,20 +58,50 @@ export function InvestmentPerfPanel({ report, annualYieldPct }: Props) {
           </div>
         </div>
 
+        {!showPerfNumbers && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <div>
+              <div className="font-semibold text-amber-700 dark:text-amber-300">
+                Aucun mouvement de cash enregistré pour ce compte
+              </div>
+              <p className="mt-0.5 leading-snug text-amber-700/80 dark:text-amber-300/80">
+                Les indicateurs Dépôts nets, Plus-value, TWR et XIRR ne peuvent pas être calculés
+                sans la liste des dépôts / retraits / achats / ventes. Importe le relevé Revolut{" "}
+                <em>Account Statement</em> (CSV plat avec colonnes <code>Date,Ticker,Type,Quantity,Price per share,Total Amount</code>) — l&apos;import peuplera automatiquement les{" "}
+                <strong>{cashflowCount} mouvement(s)</strong> nécessaires. Tu peux aussi en
+                ajouter manuellement plus bas.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Money flow row */}
         <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4 md:gap-3">
           <Kpi
             label="Dépôts nets"
             tooltip="Argent que tu as personnellement injecté dans le compte (dépôts moins retraits). N'inclut pas les dividendes ni les intérêts."
-            value={formatEUR(report.netDeposits)}
-            hint={`${formatEUR(report.deposits)} dépôts · ${formatEUR(report.withdrawals)} retraits`}
+            value={showPerfNumbers ? formatEUR(report.netDeposits) : "—"}
+            hint={
+              showPerfNumbers
+                ? `${formatEUR(report.deposits)} dépôts · ${formatEUR(report.withdrawals)} retraits`
+                : "import requis"
+            }
           />
           <Kpi
             label="Plus-value"
             tooltip="Différence entre la valeur actuelle et tes dépôts nets. C'est ton gain (ou perte) en euros, indépendamment de la durée."
-            value={formatEUR(report.totalReturnAbs, { signed: true })}
-            hint={fmtPct(report.totalReturnPct, { signed: true })}
-            tone={report.totalReturnAbs >= 0 ? "positive" : "negative"}
+            value={showPerfNumbers ? formatEUR(report.totalReturnAbs, { signed: true }) : "—"}
+            hint={
+              showPerfNumbers ? fmtPct(report.totalReturnPct, { signed: true }) : "import requis"
+            }
+            tone={
+              showPerfNumbers
+                ? report.totalReturnAbs >= 0
+                  ? "positive"
+                  : "negative"
+                : undefined
+            }
           />
           <Kpi
             label="Dividendes"
@@ -96,11 +137,11 @@ export function InvestmentPerfPanel({ report, annualYieldPct }: Props) {
           <Kpi
             label="TWR annualisé"
             tooltip="Time-Weighted Return : rendement de marché annualisé, neutralisé du timing de tes dépôts. Compare cet indicateur au rendement annoncé pour juger la qualité du portefeuille (vs. tes choix de timing)."
-            value={fmtPct(report.twrAnnualized)}
-            hint="performance pure"
+            value={fmtPct(twrAnnualizedShown)}
+            hint={showPerfNumbers ? "performance pure" : "import requis"}
             tone={
-              report.twrAnnualized != null
-                ? report.twrAnnualized >= 0
+              twrAnnualizedShown != null
+                ? twrAnnualizedShown >= 0
                   ? "positive"
                   : "negative"
                 : undefined
@@ -109,14 +150,10 @@ export function InvestmentPerfPanel({ report, annualYieldPct }: Props) {
           <Kpi
             label="XIRR"
             tooltip="Money-Weighted Return (TIR personnel). Tient compte du moment précis de chaque dépôt/retrait — c'est le taux qui décrit TON gain réel selon TES timings. Si XIRR > TWR, tu as bien chronométré tes apports."
-            value={fmtPct(report.xirr)}
-            hint="ton TIR perso"
+            value={fmtPct(xirrShown)}
+            hint={showPerfNumbers ? "ton TIR perso" : "import requis"}
             tone={
-              report.xirr != null
-                ? report.xirr >= 0
-                  ? "positive"
-                  : "negative"
-                : undefined
+              xirrShown != null ? (xirrShown >= 0 ? "positive" : "negative") : undefined
             }
           />
           <Kpi
