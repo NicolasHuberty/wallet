@@ -242,6 +242,7 @@ export default async function AccountDetailPage({
 
         {isBankSynced && (
           <BankAnalyticsPanel
+            accountId={acc.id}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -249,6 +250,8 @@ export default async function AccountDetailPage({
               notes: c.notes,
               ticker: c.ticker,
               kind: c.kind as never,
+              category: c.category as never,
+              categorySource: c.categorySource,
             }))}
           />
         )}

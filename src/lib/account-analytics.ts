@@ -24,7 +24,19 @@ export type AnalyticsCashflow = {
     | "transfer_in"
     | "transfer_out"
     | "other";
+  // Pre-resolved category (from sync-time BCE/regex pipeline or user
+  // override). When present we trust it and skip the runtime classifier.
+  category?: TransactionCategory | null;
 };
+
+function categoryOf(r: AnalyticsCashflow): TransactionCategory {
+  if (r.category) return r.category as TransactionCategory;
+  return classifyTransaction({
+    amount: r.amount,
+    notes: r.notes,
+    existingKind: r.kind,
+  });
+}
 
 function toDate(d: Date | string): Date {
   return d instanceof Date ? d : new Date(d);
@@ -122,7 +134,7 @@ export function spendingByCategory(rows: AnalyticsCashflow[]): {
   const buckets: Record<TransactionCategory, { total: number; count: number }> = Object
     .fromEntries(transactionCategory.map((c) => [c, { total: 0, count: 0 }])) as never;
   for (const r of rows) {
-    const cat = classifyTransaction(r);
+    const cat = categoryOf(r);
     buckets[cat].total += r.amount;
     buckets[cat].count++;
   }
@@ -155,7 +167,7 @@ export function monthlyByCategory(rows: AnalyticsCashflow[]): MonthlyCategoryRow
     const m = ym(r.date);
     if (!map.has(m)) map.set(m, { month: m, total: 0 });
     const row = map.get(m)!;
-    const cat = classifyTransaction(r);
+    const cat = categoryOf(r);
     row[cat] = (row[cat] ?? 0) + r.amount;
     row.total += r.amount;
   }
@@ -193,7 +205,7 @@ export function topMerchants(
   for (const r of rows) {
     if (opts.expensesOnly && r.amount >= 0) continue;
     const name = normaliseMerchantName(r.notes ?? null);
-    const cat = classifyTransaction(r);
+    const cat = categoryOf(r);
     const key = `${name}::${cat}`;
     if (!map.has(key))
       map.set(key, { name, category: cat, total: 0, abs: 0, count: 0 });
@@ -231,7 +243,7 @@ export function detectSubscriptions(rows: AnalyticsCashflow[]): Subscription[] {
     if (amt < 1 || amt > 200) continue;
     const name = normaliseMerchantName(r.notes ?? null);
     if (name === "(non identifié)") continue;
-    const cat = classifyTransaction(r);
+    const cat = categoryOf(r);
     const key = `${name}::${cat}`;
     if (!byMerchant.has(key))
       byMerchant.set(key, { name, category: cat, events: [] });
@@ -276,7 +288,7 @@ export function largestTransactions(
     .slice()
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
     .slice(0, limit)
-    .map((r) => ({ ...r, category: classifyTransaction(r) }));
+    .map((r) => ({ ...r, category: categoryOf(r) }));
 }
 
 // ─── Monthly savings rate ────────────────────────────────────────────

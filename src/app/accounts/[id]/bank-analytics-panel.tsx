@@ -1,6 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { recategorizeAccount } from "@/app/banking/actions";
 import {
   Bar,
   BarChart,
@@ -51,6 +55,8 @@ type Cashflow = {
   notes: string | null;
   ticker: string | null;
   kind: AnalyticsCashflow["kind"];
+  category: AnalyticsCashflow["category"];
+  categorySource: string | null;
 };
 
 const fmtMonth = (yyyymm: string) => {
@@ -61,11 +67,29 @@ const fmtMonth = (yyyymm: string) => {
   });
 };
 
-export function BankAnalyticsPanel({ rows }: { rows: Cashflow[] }) {
+export function BankAnalyticsPanel({
+  accountId,
+  rows,
+}: {
+  accountId: string;
+  rows: Cashflow[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
   const analyticsRows = useMemo<AnalyticsCashflow[]>(
-    () => rows.map((r) => ({ date: r.date, amount: r.amount, notes: r.notes, kind: r.kind })),
+    () =>
+      rows.map((r) => ({
+        date: r.date,
+        amount: r.amount,
+        notes: r.notes,
+        kind: r.kind,
+        category: r.category ?? null,
+      })),
     [rows],
   );
+  const bceMatchCount = rows.filter((r) => r.categorySource === "bce").length;
+  const userOverrideCount = rows.filter((r) => r.categorySource === "user").length;
+  const unclassified = rows.filter((r) => !r.category).length;
   const kpis = useMemo(() => buildKpis(analyticsRows), [analyticsRows]);
   const cats = useMemo(() => spendingByCategory(analyticsRows), [analyticsRows]);
   const monthly = useMemo(() => monthlyByCategory(analyticsRows), [analyticsRows]);
@@ -80,6 +104,20 @@ export function BankAnalyticsPanel({ rows }: { rows: Cashflow[] }) {
   );
   const savingsRate = useMemo(() => monthlySavingsRate(analyticsRows), [analyticsRows]);
 
+  function recategorize() {
+    start(async () => {
+      try {
+        const r = await recategorizeAccount({ accountId });
+        toast.success(
+          `${r.updated} transactions reclassées · ${r.bceMatches} via BCE`,
+        );
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
   if (rows.length === 0) {
     return (
       <section className="rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center text-sm text-muted-foreground">
@@ -91,6 +129,27 @@ export function BankAnalyticsPanel({ rows }: { rows: Cashflow[] }) {
 
   return (
     <div className="space-y-4">
+      {/* ─── Categorization status banner ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-medium">Catégorisation :</span>
+          <span className="text-muted-foreground">
+            <strong className="text-foreground">{bceMatchCount}</strong> via BCE
+          </span>
+          <span className="text-muted-foreground">
+            <strong className="text-foreground">{userOverrideCount}</strong> manuelles
+          </span>
+          {unclassified > 0 && (
+            <span className="text-amber-600 dark:text-amber-400">
+              <strong>{unclassified}</strong> non classées
+            </span>
+          )}
+        </div>
+        <Button size="sm" variant="outline" onClick={recategorize} disabled={pending}>
+          {pending ? "Reclassification…" : "Recatégoriser"}
+        </Button>
+      </div>
+
       {/* ─── Hero KPIs ─── */}
       <section className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
         <Kpi

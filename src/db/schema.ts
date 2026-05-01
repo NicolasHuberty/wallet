@@ -519,12 +519,59 @@ export const accountCashflow = pgTable(
     // Provider-side ID for de-duplication on re-sync (eg. GoCardless
     // transactionId, Revolut transaction ref).
     externalId: text("external_id"),
+    // Resolved transaction category — populated at sync time by the
+    // categorisation cascade (user rules → BCE/NACE → seed regex →
+    // fallback). NULL = not classified yet (e.g. legacy rows). The
+    // analytics panel reads this column rather than re-running the
+    // classifier on every page render.
+    category: text("category"),
+    // When category was assigned via BCE lookup, store the matched
+    // enterprise number for traceability (and to invalidate when the
+    // user overrides the category manually).
+    categorySource: text("category_source"), // 'user' | 'bce' | 'regex' | 'fallback'
+    bceEnterpriseNumber: text("bce_enterprise_number"),
     ...timestamps,
   },
   (t) => [
     index("account_cashflow_account_id_date_idx").on(t.accountId, t.date),
     index("account_cashflow_account_id_source_idx").on(t.accountId, t.source),
     index("account_cashflow_external_id_idx").on(t.externalId),
+    index("account_cashflow_category_idx").on(t.category),
+  ],
+);
+
+// Belgian Crossroads Bank for Enterprises (BCE / KBO) — bulk-imported
+// monthly CSV dump from https://kbopub.economie.fgov.be/kbo-open-data/.
+// Used to look up the NACE-BEL activity code of a transaction's
+// counterparty, which we map to one of our internal categories. Only
+// covers Belgian-registered companies; international merchants fall
+// through to the regex layer.
+export const bceCompany = pgTable(
+  "bce_company",
+  {
+    // Normalised enterprise number, eg. "0123456789" (10 digits, no dots).
+    enterpriseNumber: text("enterprise_number").primaryKey(),
+    // Legal name as in the registry.
+    denomination: text("denomination").notNull(),
+    // Commercial / trade name when distinct from the legal name.
+    commercialName: text("commercial_name"),
+    // Lowercase, ASCII-folded, punctuation-stripped, generic-suffix-stripped
+    // version of the legal name — used for fuzzy lookup against transaction
+    // counterparty names.
+    searchName: text("search_name").notNull(),
+    // Primary NACE-BEL 2008 code (5 digits, eg. "47110").
+    naceCode: text("nace_code"),
+    // Human-readable label of the NACE activity (FR/NL/EN, whichever
+    // available in the dump).
+    naceDescription: text("nace_description"),
+    status: text("status"),
+    juridicalForm: text("juridical_form"),
+    startDate: timestamp("start_date", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index("bce_company_search_name_idx").on(t.searchName),
+    index("bce_company_nace_code_idx").on(t.naceCode),
   ],
 );
 

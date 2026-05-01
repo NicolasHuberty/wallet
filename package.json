@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed-demo": "tsx scripts/seed-demo.ts",
+    "import-bce": "tsx scripts/import-bce.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

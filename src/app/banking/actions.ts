@@ -1,7 +1,7 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { and, eq, lte, gte } from "drizzle-orm";
+import { and, eq, inArray, lte, gte, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -22,6 +22,15 @@ import {
   type Institution,
 } from "@/lib/gocardless";
 import type { CashflowKind } from "@/db/schema";
+import {
+  classifyTransaction,
+  type TransactionCategory,
+} from "@/lib/transaction-categorizer";
+import {
+  looksLikePerson,
+  naceToCategory,
+  normalizeBceName,
+} from "@/lib/bce";
 
 function requireConfigured() {
   if (!isConfigured()) {
@@ -160,6 +169,91 @@ function txDescription(t: GcTransaction): string | null {
   return lines.length > 0 ? lines.slice(0, 2).join(" — ").slice(0, 280) : null;
 }
 
+// Returns the most likely company name to feed into BCE lookup. Prefers the
+// counterparty name fields over the free-form remittance string.
+function txCounterpartyName(t: GcTransaction): string | null {
+  return t.creditorName ?? t.debtorName ?? t.remittanceInformationUnstructured ?? null;
+}
+
+// Run BCE lookup in batch, then fall back to regex per transaction.
+// Returns a parallel array of resolved categories.
+type ResolvedCategory = {
+  category: TransactionCategory;
+  source: "bce" | "regex";
+  bceEnterpriseNumber: string | null;
+};
+
+async function resolveCategoriesBatch(
+  inputs: Array<{ amount: number; notes: string | null; counterparty: string | null; kind: CashflowKind }>,
+): Promise<ResolvedCategory[]> {
+  // Build the set of unique normalised search names from counterparty fields
+  const searchKeys = new Set<string>();
+  const normByIndex = new Array<string | null>(inputs.length);
+  for (let i = 0; i < inputs.length; i++) {
+    const cp = inputs[i].counterparty;
+    if (!cp) {
+      normByIndex[i] = null;
+      continue;
+    }
+    const norm = normalizeBceName(cp);
+    if (!norm || looksLikePerson(norm)) {
+      normByIndex[i] = null;
+      continue;
+    }
+    normByIndex[i] = norm;
+    searchKeys.add(norm);
+  }
+
+  // Single batch query — exact match only (covers ~70 % of company hits;
+  // prefix/substring fallback is reserved for the on-demand single-tx
+  // categorize-this-row path which we'll add later if needed).
+  const matchByName = new Map<string, { enterpriseNumber: string; naceCode: string | null }>();
+  if (searchKeys.size > 0) {
+    const rows = await db
+      .select({
+        searchName: schema.bceCompany.searchName,
+        enterpriseNumber: schema.bceCompany.enterpriseNumber,
+        naceCode: schema.bceCompany.naceCode,
+      })
+      .from(schema.bceCompany)
+      .where(inArray(schema.bceCompany.searchName, Array.from(searchKeys)));
+    for (const r of rows) {
+      // First-write wins (BCE companies are unique by enterpriseNumber but
+      // searchName collisions can happen for big retailers with multiple
+      // legal entities — we just keep the first match)
+      if (!matchByName.has(r.searchName))
+        matchByName.set(r.searchName, {
+          enterpriseNumber: r.enterpriseNumber,
+          naceCode: r.naceCode,
+        });
+    }
+  }
+
+  // Resolve per row
+  const out: ResolvedCategory[] = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const norm = normByIndex[i];
+    if (norm) {
+      const m = matchByName.get(norm);
+      if (m) {
+        const cat = naceToCategory(m.naceCode);
+        if (cat) {
+          out.push({ category: cat, source: "bce", bceEnterpriseNumber: m.enterpriseNumber });
+          continue;
+        }
+      }
+    }
+    // Regex fallback
+    const cat = classifyTransaction({
+      amount: inputs[i].amount,
+      notes: inputs[i].notes,
+      existingKind: inputs[i].kind,
+    });
+    out.push({ category: cat, source: "regex", bceEnterpriseNumber: null });
+  }
+  return out;
+}
+
 export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
   assertWritable();
   requireConfigured();
@@ -241,28 +335,74 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
         dateFrom: dateFrom.toISOString().slice(0, 10),
       });
       const all = [...(transactions.booked ?? []), ...(transactions.pending ?? [])];
+
+      // Pre-compute (amount, kind, notes, counterparty) for each tx, then
+      // batch-resolve categories via BCE → regex.
+      type TxPrep = {
+        t: GcTransaction;
+        ext: string | null;
+        amount: number;
+        date: Date;
+        kind: CashflowKind;
+        notes: string | null;
+        counterparty: string | null;
+      };
+      const prepared: TxPrep[] = [];
       for (const t of all) {
-        const ext = txExternalId(t);
         const amount = parseFloat(t.transactionAmount.amount);
         if (!isFinite(amount)) continue;
-        const date = txDate(t);
-        const kind = classifyTxKind(t);
-        const notes = txDescription(t);
+        prepared.push({
+          t,
+          ext: txExternalId(t),
+          amount,
+          date: txDate(t),
+          kind: classifyTxKind(t),
+          notes: txDescription(t),
+          counterparty: txCounterpartyName(t),
+        });
+      }
+      const resolved = await resolveCategoriesBatch(
+        prepared.map((p) => ({
+          amount: p.amount,
+          notes: p.notes,
+          counterparty: p.counterparty,
+          kind: p.kind,
+        })),
+      );
 
-        if (ext) {
+      for (let i = 0; i < prepared.length; i++) {
+        const p = prepared[i];
+        const r = resolved[i];
+
+        if (p.ext) {
           const [existing] = await db
             .select()
             .from(schema.accountCashflow)
             .where(
               and(
                 eq(schema.accountCashflow.accountId, acc.id),
-                eq(schema.accountCashflow.externalId, ext),
+                eq(schema.accountCashflow.externalId, p.ext),
               ),
             );
           if (existing) {
+            // Don't overwrite a user-set category (categorySource = 'user')
+            const preserveCategory = existing.categorySource === "user";
             await db
               .update(schema.accountCashflow)
-              .set({ amount, kind, date, notes, updatedAt: now })
+              .set({
+                amount: p.amount,
+                kind: p.kind,
+                date: p.date,
+                notes: p.notes,
+                ...(preserveCategory
+                  ? {}
+                  : {
+                      category: r.category,
+                      categorySource: r.source,
+                      bceEnterpriseNumber: r.bceEnterpriseNumber,
+                    }),
+                updatedAt: now,
+              })
               .where(eq(schema.accountCashflow.id, existing.id));
             transactionsUpdated++;
             continue;
@@ -270,12 +410,15 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
         }
         await db.insert(schema.accountCashflow).values({
           accountId: acc.id,
-          date,
-          kind,
-          amount,
-          notes,
+          date: p.date,
+          kind: p.kind,
+          amount: p.amount,
+          notes: p.notes,
           source: "bank_sync",
-          externalId: ext,
+          externalId: p.ext,
+          category: r.category,
+          categorySource: r.source,
+          bceEnterpriseNumber: r.bceEnterpriseNumber,
           updatedAt: now,
         });
         transactionsAdded++;
@@ -347,6 +490,102 @@ export async function fetchConnectionAccounts(
     }
   }
   return out;
+}
+
+// ─── Re-categorize all cashflows for an account ─────────────────────
+// Useful after a BCE import refresh, or to backfill old rows that were
+// created before the BCE pipeline existed. Skips rows the user has
+// manually overridden (categorySource = 'user').
+
+const recatSchema = z.object({ accountId: z.string().min(1) });
+
+export async function recategorizeAccount(
+  values: z.infer<typeof recatSchema>,
+): Promise<{ updated: number; bceMatches: number }> {
+  assertWritable();
+  const p = recatSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const [acc] = await db
+    .select()
+    .from(schema.account)
+    .where(and(eq(schema.account.id, p.accountId), eq(schema.account.householdId, h.id)));
+  if (!acc) throw new Error("Compte introuvable");
+
+  const rows = await db
+    .select()
+    .from(schema.accountCashflow)
+    .where(eq(schema.accountCashflow.accountId, acc.id));
+
+  // Skip user-overridden rows
+  const target = rows.filter((r) => r.categorySource !== "user");
+  if (target.length === 0) return { updated: 0, bceMatches: 0 };
+
+  const resolved = await resolveCategoriesBatch(
+    target.map((r) => ({
+      amount: r.amount,
+      notes: r.notes,
+      counterparty: r.notes, // we don't store counterparty separately yet — use notes
+      kind: r.kind as CashflowKind,
+    })),
+  );
+
+  let bceMatches = 0;
+  const now = new Date();
+  for (let i = 0; i < target.length; i++) {
+    const r = target[i];
+    const cat = resolved[i];
+    if (cat.source === "bce") bceMatches++;
+    await db
+      .update(schema.accountCashflow)
+      .set({
+        category: cat.category,
+        categorySource: cat.source,
+        bceEnterpriseNumber: cat.bceEnterpriseNumber,
+        updatedAt: now,
+      })
+      .where(eq(schema.accountCashflow.id, r.id));
+  }
+
+  revalidatePath(`/accounts/${acc.id}`);
+  return { updated: target.length, bceMatches };
+}
+
+// ─── Manual override of a single cashflow's category ─────────────────
+// First step of the user-feedback loop. Sets categorySource = 'user' so
+// future re-categorizations / re-syncs leave it alone.
+
+const setCategorySchema = z.object({
+  cashflowId: z.string().min(1),
+  category: z.string().min(1),
+});
+
+export async function setCashflowCategory(
+  values: z.infer<typeof setCategorySchema>,
+) {
+  assertWritable();
+  const p = setCategorySchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const [row] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  if (!row || row.householdId !== h.id) throw new Error("Mouvement introuvable");
+
+  await db
+    .update(schema.accountCashflow)
+    .set({
+      category: p.category,
+      categorySource: "user",
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+
+  revalidatePath(`/accounts/${row.accountId}`);
 }
 
 // ─── Disconnect / delete a bank connection ────────────────────────────
