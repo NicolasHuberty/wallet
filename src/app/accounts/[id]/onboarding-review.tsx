@@ -20,7 +20,10 @@ import {
   categoryLabel,
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
-import { setCashflowCategoryWithRule } from "@/app/banking/actions";
+import {
+  setCashflowCategoryWithRule,
+  createOneOffChargeFromCashflow,
+} from "@/app/banking/actions";
 import {
   TransactionEditDialog,
   type HouseholdAccountOption,
@@ -216,6 +219,25 @@ function ReviewWizard({
             `${r.bulkUpdated} virements vers "${targetName}" liés (et exclus des dépenses)`,
           );
         else toast.success(`Virement vers "${targetName}" enregistré`);
+        advance();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
+  function quickCharge(category: string, label: string) {
+    if (!current) return;
+    const finalLabel = (current.notes ?? "").slice(0, 120) || label;
+    start(async () => {
+      try {
+        const r = await createOneOffChargeFromCashflow({
+          cashflowId: current.id,
+          label: finalLabel,
+          category,
+          includeInCostBasis: false,
+        });
+        toast.success(`Frais "${r.label}" créé et lié`);
         advance();
       } catch (e) {
         toast.error((e as Error).message);
@@ -423,23 +445,42 @@ function ReviewWizard({
 
             {/* Exceptional charge shortcut — only on negative rows */}
             {current.amount < 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
-                <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
                   <Receipt className="size-3.5" />
-                  C&apos;est une dépense exceptionnelle (taxes, frais notaire, dépenses imprévues
-                  importantes) ?
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setAdvancedCreateCharge(true);
-                    setAdvanced(true);
-                  }}
-                  disabled={pending}
-                >
-                  + Créer un frais one-shot
-                </Button>
+                  Dépense exceptionnelle ? Crée un frais one-shot en 1 clic :
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {(
+                    [
+                      { cat: "tax", label: "Impôt / Taxe" },
+                      { cat: "notary", label: "Notaire" },
+                      { cat: "registration_tax", label: "Droits d'enreg." },
+                      { cat: "renovation", label: "Travaux" },
+                      { cat: "expertise", label: "Expertise" },
+                      { cat: "legal", label: "Frais légaux" },
+                      { cat: "credit_fees", label: "Frais de dossier" },
+                      { cat: "mortgage_insurance", label: "Assur. prêt" },
+                      { cat: "other", label: "Autre frais" },
+                    ] as const
+                  ).map((b) => (
+                    <button
+                      key={b.cat}
+                      type="button"
+                      onClick={() => quickCharge(b.cat, b.label)}
+                      disabled={pending}
+                      className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-background px-2 py-1.5 text-left text-[11px] font-medium transition-colors hover:border-amber-700 disabled:opacity-50"
+                    >
+                      <Receipt className="size-3 shrink-0 text-amber-600" />
+                      <span className="truncate">{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  Le frais reprend automatiquement le montant ({formatEUR(Math.abs(current.amount))})
+                  et la date ({formatDateFR(current.date)}). Édite le libellé / la propriété
+                  ensuite depuis <em>Frais one-shot</em> si nécessaire.
+                </p>
               </div>
             )}
 
