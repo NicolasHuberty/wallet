@@ -1,13 +1,14 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { accountKind } from "@/db/schema";
 import { recomputeSnapshot } from "@/lib/snapshots";
 import { assertWritable } from "@/lib/demo";
 import { toDate } from "@/lib/utils";
+import { parseRevolutSavingsCsv } from "@/lib/revolut";
 
 const upsertSchema = z.object({
   id: z.string().optional(),
@@ -141,4 +142,101 @@ export async function deleteAccountHistoryPoint(id: string, accountId: string) {
   await db.delete(schema.accountSnapshot).where(eq(schema.accountSnapshot.id, id));
   revalidatePath(`/accounts/${accountId}`);
   revalidatePath("/accounts");
+}
+
+// ---------- Revolut savings statement import ----------
+// Imports the flat French savings statement CSV into a savings (or cash)
+// account: writes one accountSnapshot per calendar day from the running
+// balance column, and aligns account.currentValue with the last balance.
+
+const savingsImportSchema = z.object({
+  accountId: z.string().min(1),
+  csv: z.string().min(1),
+});
+
+export type RevolutSavingsImportOutcome = {
+  format: "savings";
+  snapshotsCreated: number;
+  snapshotsUpdated: number;
+  totals: {
+    deposits: number;
+    withdrawals: number;
+    interest: number;
+    finalBalance: number;
+    eventCount: number;
+  };
+  warnings: string[];
+};
+
+export async function importRevolutSavingsStatement(
+  values: z.infer<typeof savingsImportSchema>,
+): Promise<RevolutSavingsImportOutcome> {
+  assertWritable();
+  const p = savingsImportSchema.parse(values);
+  const result = parseRevolutSavingsCsv(p.csv);
+
+  const [acc] = await db.select().from(schema.account).where(eq(schema.account.id, p.accountId));
+  if (!acc) throw new Error("Compte introuvable");
+
+  let snapshotsCreated = 0;
+  let snapshotsUpdated = 0;
+
+  if (result.snapshots.length > 0) {
+    const minDate = new Date(`${result.snapshots[0].date}T00:00:00Z`);
+    const maxDate = new Date(`${result.snapshots[result.snapshots.length - 1].date}T23:59:59Z`);
+    const existing = await db
+      .select()
+      .from(schema.accountSnapshot)
+      .where(
+        and(
+          eq(schema.accountSnapshot.accountId, p.accountId),
+          gte(schema.accountSnapshot.date, minDate),
+          lte(schema.accountSnapshot.date, maxDate),
+        ),
+      );
+    const byDay = new Map<string, (typeof existing)[number]>();
+    for (const s of existing) {
+      const d = toDate(s.date);
+      const ymd = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      byDay.set(ymd, s);
+    }
+
+    for (const snap of result.snapshots) {
+      const date = new Date(`${snap.date}T12:00:00Z`);
+      const prev = byDay.get(snap.date);
+      if (prev) {
+        await db
+          .update(schema.accountSnapshot)
+          .set({ value: snap.value, date, updatedAt: new Date() })
+          .where(eq(schema.accountSnapshot.id, prev.id));
+        snapshotsUpdated++;
+      } else {
+        await db.insert(schema.accountSnapshot).values({
+          accountId: p.accountId,
+          date,
+          value: snap.value,
+          updatedAt: new Date(),
+        });
+        snapshotsCreated++;
+      }
+    }
+
+    await db
+      .update(schema.account)
+      .set({ currentValue: result.totals.finalBalance, updatedAt: new Date() })
+      .where(eq(schema.account.id, p.accountId));
+  }
+
+  await recomputeSnapshot(acc.householdId);
+  revalidatePath(`/accounts/${p.accountId}`);
+  revalidatePath("/accounts");
+  revalidatePath("/");
+
+  return {
+    format: "savings",
+    snapshotsCreated,
+    snapshotsUpdated,
+    totals: result.totals,
+    warnings: result.warnings,
+  };
 }

@@ -19,6 +19,7 @@ import {
   AddHistoryPointForm,
   DeleteHistoryButton,
 } from "./edit-controls";
+import { RevolutImportDialog } from "../../investments/revolut-import-dialog";
 import { toDate } from "@/lib/utils";
 
 export default async function AccountDetailPage({
@@ -98,6 +99,13 @@ export default async function AccountDetailPage({
 
   const totalVariation = current - first;
 
+  const supportsRevolutImport =
+    acc.kind === "savings" ||
+    acc.kind === "cash" ||
+    acc.kind === "brokerage" ||
+    acc.kind === "retirement" ||
+    acc.kind === "crypto";
+
   return (
     <>
       <PageHeader
@@ -113,11 +121,19 @@ export default async function AccountDetailPage({
           </span>
         }
         action={
-          <Link href="/accounts">
-            <Button variant="outline" size="sm">
-              <ArrowLeft className="size-4" /> Retour
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {supportsRevolutImport && (
+              <RevolutImportDialog
+                accounts={[{ id: acc.id, name: acc.name, kind: acc.kind }]}
+                defaultAccountId={acc.id}
+              />
+            )}
+            <Link href="/accounts">
+              <Button variant="outline" size="sm">
+                <ArrowLeft className="size-4" /> Retour
+              </Button>
+            </Link>
+          </div>
         }
       />
       <div className="space-y-6 p-4 md:p-8">

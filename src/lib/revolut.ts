@@ -305,3 +305,514 @@ export function parseRevolutCsv(raw: string): RevolutImportResult {
 
   return { etfs, totalDividends, warnings, detectedSections };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Flat investment transaction statement
+// Header: Date,Ticker,Type,Quantity,Price per share,Total Amount,Currency,FX Rate
+// Types: BUY - MARKET, SELL - MARKET, DIVIDEND, CASH TOP-UP, CASH WITHDRAWAL,
+//        ROBO MANAGEMENT FEE
+// ─────────────────────────────────────────────────────────────────────
+
+export type RevolutInvestmentHolding = {
+  ticker: string;
+  currency: string;
+  quantity: number;
+  avgCost: number;
+  totalCost: number;
+  realizedPnl: number;
+  totalDividends: number;
+  lastPrice: number;
+  buys: number;
+  sells: number;
+};
+
+export type RevolutInvestmentSnapshot = {
+  date: string; // YYYY-MM-DD
+  value: number; // cash + position value
+  cash: number;
+  positionValue: number;
+};
+
+export type RevolutInvestmentResult = {
+  format: "investment-transactions";
+  holdings: RevolutInvestmentHolding[];
+  snapshots: RevolutInvestmentSnapshot[];
+  totals: {
+    contributions: number;
+    withdrawals: number;
+    dividends: number;
+    fees: number;
+    buys: number;
+    sells: number;
+    finalCash: number;
+    finalPositionValue: number;
+    finalValue: number;
+    eventCount: number;
+  };
+  warnings: string[];
+};
+
+function ymdUtc(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function isInvestmentTransactionsHeader(headerCols: string[]): boolean {
+  const norm = headerCols.map((c) => normalizeHeader(c));
+  return (
+    norm.includes("date") &&
+    norm.includes("ticker") &&
+    norm.includes("type") &&
+    norm.includes("quantity") &&
+    (norm.includes("price_per_share") || norm.includes("price")) &&
+    norm.includes("total_amount")
+  );
+}
+
+export function parseRevolutInvestmentCsv(raw: string): RevolutInvestmentResult {
+  const warnings: string[] = [];
+  const empty: RevolutInvestmentResult = {
+    format: "investment-transactions",
+    holdings: [],
+    snapshots: [],
+    totals: {
+      contributions: 0,
+      withdrawals: 0,
+      dividends: 0,
+      fees: 0,
+      buys: 0,
+      sells: 0,
+      finalCash: 0,
+      finalPositionValue: 0,
+      finalValue: 0,
+      eventCount: 0,
+    },
+    warnings,
+  };
+
+  if (!raw || !raw.trim()) {
+    warnings.push("Fichier vide");
+    return empty;
+  }
+
+  const lines = raw.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
+  if (lines.length === 0) {
+    warnings.push("Fichier vide");
+    return empty;
+  }
+
+  const headerCols = splitCsvLine(lines[0]);
+  if (!isInvestmentTransactionsHeader(headerCols)) {
+    warnings.push("Format inattendu : en-tête de transactions non reconnu");
+    return empty;
+  }
+  const hmap: Record<string, number> = {};
+  headerCols.forEach((h, i) => (hmap[normalizeHeader(h)] = i));
+  const idx = (k: string): number | undefined => (hmap[k] !== undefined ? hmap[k] : undefined);
+
+  const dateIdx = idx("date")!;
+  const tickerIdx = idx("ticker")!;
+  const typeIdx = idx("type")!;
+  const qtyIdx = idx("quantity")!;
+  const priceIdx = idx("price_per_share") ?? idx("price")!;
+  const amountIdx = idx("total_amount")!;
+  const currencyIdx = idx("currency");
+
+  type Event = {
+    date: Date;
+    ticker: string;
+    kind: "BUY" | "SELL" | "DIVIDEND" | "TOP_UP" | "WITHDRAWAL" | "FEE" | "OTHER";
+    quantity: number;
+    price: number;
+    amount: number;
+    currency: string;
+  };
+
+  const events: Event[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i]);
+    if (cols.length < 3) continue;
+
+    const dateStr = cols[dateIdx] ?? "";
+    const ticker = (cols[tickerIdx] ?? "").trim();
+    const typeRaw = (cols[typeIdx] ?? "").toUpperCase();
+    const quantity = parseNum(cols[qtyIdx] ?? "");
+    const price = parseNum(cols[priceIdx] ?? "");
+    const amount = parseNum(cols[amountIdx] ?? "");
+    const currency =
+      currencyIdx !== undefined ? (cols[currencyIdx] ?? "EUR").trim() || "EUR" : "EUR";
+
+    if (!dateStr) continue;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) continue;
+
+    let kind: Event["kind"];
+    if (typeRaw.startsWith("BUY")) kind = "BUY";
+    else if (typeRaw.startsWith("SELL")) kind = "SELL";
+    else if (typeRaw.includes("DIVIDEND")) kind = "DIVIDEND";
+    else if (typeRaw.includes("TOP-UP") || typeRaw.includes("TOP UP")) kind = "TOP_UP";
+    else if (typeRaw.includes("WITHDRAWAL")) kind = "WITHDRAWAL";
+    else if (typeRaw.includes("FEE") || typeRaw.includes("MANAGEMENT")) kind = "FEE";
+    else kind = "OTHER";
+
+    events.push({ date: d, ticker, kind, quantity, price, amount, currency });
+  }
+
+  events.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  const holdings = new Map<string, RevolutInvestmentHolding>();
+  let cash = 0;
+  let contributions = 0;
+  let withdrawals = 0;
+  let dividends = 0;
+  let fees = 0;
+  let buys = 0;
+  let sells = 0;
+
+  const snapshotsByDay = new Map<string, RevolutInvestmentSnapshot>();
+
+  function getHolding(ticker: string, currency: string): RevolutInvestmentHolding {
+    let h = holdings.get(ticker);
+    if (!h) {
+      h = {
+        ticker,
+        currency: currency || "EUR",
+        quantity: 0,
+        avgCost: 0,
+        totalCost: 0,
+        realizedPnl: 0,
+        totalDividends: 0,
+        lastPrice: 0,
+        buys: 0,
+        sells: 0,
+      };
+      holdings.set(ticker, h);
+    }
+    return h;
+  }
+
+  function snapshotEndOfDay(date: Date) {
+    let positionValue = 0;
+    for (const h of holdings.values()) {
+      if (h.quantity > 0) positionValue += h.quantity * h.lastPrice;
+    }
+    const ymd = ymdUtc(date);
+    snapshotsByDay.set(ymd, {
+      date: ymd,
+      value: cash + positionValue,
+      cash,
+      positionValue,
+    });
+  }
+
+  for (const e of events) {
+    const cashFlow = Math.abs(e.amount);
+    switch (e.kind) {
+      case "TOP_UP":
+        cash += cashFlow;
+        contributions += cashFlow;
+        break;
+      case "WITHDRAWAL":
+        cash -= cashFlow;
+        withdrawals += cashFlow;
+        break;
+      case "FEE":
+        cash -= cashFlow;
+        fees += cashFlow;
+        break;
+      case "DIVIDEND": {
+        cash += cashFlow;
+        dividends += cashFlow;
+        if (e.ticker) {
+          const h = getHolding(e.ticker, e.currency);
+          h.totalDividends += cashFlow;
+        }
+        break;
+      }
+      case "BUY": {
+        if (!e.ticker || e.quantity <= 0) break;
+        cash -= cashFlow;
+        buys += cashFlow;
+        const h = getHolding(e.ticker, e.currency);
+        const newQty = h.quantity + e.quantity;
+        const newCost = h.totalCost + cashFlow;
+        h.quantity = newQty;
+        h.totalCost = newCost;
+        h.avgCost = newQty > 0 ? newCost / newQty : 0;
+        h.lastPrice = e.price || h.lastPrice;
+        h.buys += cashFlow;
+        break;
+      }
+      case "SELL": {
+        if (!e.ticker || e.quantity <= 0) break;
+        cash += cashFlow;
+        sells += cashFlow;
+        const h = getHolding(e.ticker, e.currency);
+        const soldQty = Math.min(e.quantity, h.quantity);
+        const costRemoved = soldQty * h.avgCost;
+        h.quantity -= soldQty;
+        h.totalCost = Math.max(0, h.totalCost - costRemoved);
+        h.realizedPnl += cashFlow - costRemoved;
+        h.lastPrice = e.price || h.lastPrice;
+        h.sells += cashFlow;
+        if (h.quantity <= 1e-9) {
+          h.quantity = 0;
+          h.avgCost = 0;
+          h.totalCost = 0;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+    snapshotEndOfDay(e.date);
+  }
+
+  const snapshots = Array.from(snapshotsByDay.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+
+  const finalSnap = snapshots[snapshots.length - 1];
+  const finalCash = cash;
+  const finalPositionValue = finalSnap?.positionValue ?? 0;
+  const finalValue = finalSnap?.value ?? cash;
+
+  if (events.length === 0) {
+    warnings.push("Aucune transaction détectée");
+  }
+
+  return {
+    format: "investment-transactions",
+    holdings: Array.from(holdings.values()).sort((a, b) => a.ticker.localeCompare(b.ticker)),
+    snapshots,
+    totals: {
+      contributions,
+      withdrawals,
+      dividends,
+      fees,
+      buys,
+      sells,
+      finalCash,
+      finalPositionValue,
+      finalValue,
+      eventCount: events.length,
+    },
+    warnings,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Flat savings statement (French)
+// Header: Date,Description,Taux d'intérêt brut gagné,Argent entrant,Argent sortant,Solde
+// Date format: "1 oct. 2025"
+// Number format: "2 043,26€"
+// ─────────────────────────────────────────────────────────────────────
+
+export type RevolutSavingsSnapshot = {
+  date: string; // YYYY-MM-DD
+  value: number;
+};
+
+export type RevolutSavingsResult = {
+  format: "savings";
+  snapshots: RevolutSavingsSnapshot[];
+  totals: {
+    deposits: number;
+    withdrawals: number;
+    interest: number;
+    finalBalance: number;
+    eventCount: number;
+  };
+  warnings: string[];
+};
+
+const FR_MONTHS: Record<string, number> = {
+  "janv.": 1,
+  janv: 1,
+  janvier: 1,
+  "févr.": 2,
+  fevr: 2,
+  fev: 2,
+  fevrier: 2,
+  février: 2,
+  mars: 3,
+  "avr.": 4,
+  avr: 4,
+  avril: 4,
+  mai: 5,
+  juin: 6,
+  "juil.": 7,
+  juil: 7,
+  juillet: 7,
+  août: 8,
+  aout: 8,
+  "sept.": 9,
+  sept: 9,
+  septembre: 9,
+  "oct.": 10,
+  oct: 10,
+  octobre: 10,
+  "nov.": 11,
+  nov: 11,
+  novembre: 11,
+  "déc.": 12,
+  dec: 12,
+  decembre: 12,
+  décembre: 12,
+};
+
+function parseFrDate(raw: string): Date | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  const m = cleaned.match(/^(\d{1,2})\s+([a-zéûôâ.]+)\s+(\d{4})$/i);
+  if (!m) return null;
+  const day = parseInt(m[1], 10);
+  const monthRaw = m[2];
+  const year = parseInt(m[3], 10);
+  const month = FR_MONTHS[monthRaw] ?? FR_MONTHS[monthRaw.replace(/\.$/, "")];
+  if (!month) return null;
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+}
+
+function parseFrAmount(raw: string): number {
+  if (!raw) return 0;
+  const cleaned = raw
+    .replace(/ /g, " ")
+    .replace(/[€$£]/g, "")
+    .replace(/EUR|USD|GBP/gi, "")
+    .replace(/\s/g, "")
+    .replace(/\./g, "")
+    .replace(/,/g, ".");
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
+function isSavingsHeader(headerCols: string[]): boolean {
+  const norm = headerCols.map((c) => normalizeHeader(c));
+  return (
+    norm.includes("date") &&
+    norm.some((c) => c.includes("argent_entrant") || c.includes("entrant")) &&
+    norm.some((c) => c.includes("argent_sortant") || c.includes("sortant")) &&
+    norm.includes("solde")
+  );
+}
+
+export function parseRevolutSavingsCsv(raw: string): RevolutSavingsResult {
+  const warnings: string[] = [];
+  const empty: RevolutSavingsResult = {
+    format: "savings",
+    snapshots: [],
+    totals: { deposits: 0, withdrawals: 0, interest: 0, finalBalance: 0, eventCount: 0 },
+    warnings,
+  };
+  if (!raw || !raw.trim()) {
+    warnings.push("Fichier vide");
+    return empty;
+  }
+
+  const lines = raw.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
+  if (lines.length === 0) {
+    warnings.push("Fichier vide");
+    return empty;
+  }
+
+  const headerCols = splitCsvLine(lines[0]);
+  if (!isSavingsHeader(headerCols)) {
+    warnings.push("Format inattendu : en-tête de relevé épargne non reconnu");
+    return empty;
+  }
+
+  const hmap: Record<string, number> = {};
+  headerCols.forEach((h, i) => (hmap[normalizeHeader(h)] = i));
+  const findIdx = (predicate: (k: string) => boolean): number | undefined => {
+    for (const k of Object.keys(hmap)) if (predicate(k)) return hmap[k];
+    return undefined;
+  };
+  const dateIdx = hmap["date"];
+  const inIdx = findIdx((k) => k.includes("entrant"))!;
+  const outIdx = findIdx((k) => k.includes("sortant"))!;
+  const balIdx = hmap["solde"];
+  const descIdx = hmap["description"];
+
+  let deposits = 0;
+  let withdrawals = 0;
+  let interest = 0;
+
+  type Row = { date: Date; balance: number };
+  const rows: Row[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i]);
+    if (cols.length < 3) continue;
+
+    const dateStr = decodeEntities(cols[dateIdx] ?? "");
+    const d = parseFrDate(dateStr);
+    if (!d) continue;
+
+    const inAmt = parseFrAmount(cols[inIdx] ?? "");
+    const outAmt = parseFrAmount(cols[outIdx] ?? "");
+    const balance = parseFrAmount(cols[balIdx] ?? "");
+    const desc = decodeEntities(cols[descIdx] ?? "").toLowerCase();
+
+    if (desc.includes("intérêt") || desc.includes("interet")) interest += inAmt;
+    else if (inAmt > 0) deposits += inAmt;
+    if (outAmt > 0) withdrawals += outAmt;
+
+    rows.push({ date: d, balance });
+  }
+
+  if (rows.length === 0) {
+    warnings.push("Aucune ligne d'épargne détectée");
+  }
+
+  // Dedupe per day: keep the LAST balance entry encountered for that day.
+  const byDay = new Map<string, RevolutSavingsSnapshot>();
+  for (const r of rows) {
+    const ymd = ymdUtc(r.date);
+    byDay.set(ymd, { date: ymd, value: r.balance });
+  }
+  const snapshots = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    format: "savings",
+    snapshots,
+    totals: {
+      deposits,
+      withdrawals,
+      interest,
+      finalBalance: snapshots[snapshots.length - 1]?.value ?? 0,
+      eventCount: rows.length,
+    },
+    warnings,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Auto-detect any of the three formats
+// ─────────────────────────────────────────────────────────────────────
+
+export type RevolutTaxReportResult = RevolutImportResult & { format: "tax-report" };
+
+export type RevolutAnyResult =
+  | RevolutTaxReportResult
+  | RevolutInvestmentResult
+  | RevolutSavingsResult;
+
+export function detectAndParseRevolut(raw: string): RevolutAnyResult {
+  const text = (raw ?? "").replace(/\r\n/g, "\n");
+  // Find first non-blank line
+  const firstLine = text.split("\n").find((l) => l.trim() !== "") ?? "";
+  const headerCols = splitCsvLine(firstLine);
+
+  if (isSavingsHeader(headerCols)) {
+    return parseRevolutSavingsCsv(text);
+  }
+  if (isInvestmentTransactionsHeader(headerCols)) {
+    return parseRevolutInvestmentCsv(text);
+  }
+  const taxReport = parseRevolutCsv(text);
+  return { ...taxReport, format: "tax-report" };
+}

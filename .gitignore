@@ -55,3 +55,6 @@ next-env.d.ts
 
 # claude
 .claude/
+
+# user-specific CSV exports / statements at the repo root (personal data)
+/*.csv
