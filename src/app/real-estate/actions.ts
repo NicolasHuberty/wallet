@@ -136,6 +136,10 @@ export async function saveMortgage(values: z.infer<typeof mortgageSchema>) {
 
 const fullPropertySchema = z.object({
   householdId: z.string(),
+  // When set, attach the new property/mortgage/charges to this existing
+  // real_estate account (created earlier by onboarding) instead of creating a
+  // fresh account. The existing account is updated in place (name, currentValue).
+  existingAccountId: z.string().optional().nullable(),
   property: z.object({
     name: z.string().min(1),
     address: z.string().optional().nullable(),
@@ -178,14 +182,45 @@ export async function createFullProperty(values: z.infer<typeof fullPropertySche
   const p = fullPropertySchema.parse(values);
   const signingDate = new Date(p.property.signingDate);
 
-  const [propertyAccount] = await db.insert(schema.account).values({
-    householdId: p.householdId,
-    name: p.property.name,
-    kind: "real_estate",
-    currentValue: p.property.currentValue,
-    ownership: "shared",
-    sharedSplitPct: 50,
-  }).returning();
+  let propertyAccount: typeof schema.account.$inferSelect;
+  if (p.existingAccountId) {
+    const [acc] = await db
+      .select()
+      .from(schema.account)
+      .where(eq(schema.account.id, p.existingAccountId));
+    if (!acc) throw new Error("Compte introuvable");
+    if (acc.kind !== "real_estate") throw new Error("Le compte n'est pas un bien immobilier");
+    if (acc.householdId !== p.householdId)
+      throw new Error("Ce compte n'appartient pas à ce ménage");
+    // Refuse if a property is already attached.
+    const existingProp = await db
+      .select()
+      .from(schema.property)
+      .where(eq(schema.property.accountId, acc.id));
+    if (existingProp.length > 0)
+      throw new Error("Ce bien est déjà complété (un dossier existe déjà)");
+    await db
+      .update(schema.account)
+      .set({
+        name: p.property.name,
+        currentValue: p.property.currentValue,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.account.id, acc.id));
+    propertyAccount = { ...acc, name: p.property.name, currentValue: p.property.currentValue };
+  } else {
+    [propertyAccount] = await db
+      .insert(schema.account)
+      .values({
+        householdId: p.householdId,
+        name: p.property.name,
+        kind: "real_estate",
+        currentValue: p.property.currentValue,
+        ownership: "shared",
+        sharedSplitPct: 50,
+      })
+      .returning();
+  }
 
   const [propertyRow] = await db.insert(schema.property).values({
     accountId: propertyAccount.id,

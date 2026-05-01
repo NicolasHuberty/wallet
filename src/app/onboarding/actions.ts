@@ -32,24 +32,39 @@ const onboardingSchema = z.object({
     .default([]),
 });
 
-export async function completeOnboarding(values: z.infer<typeof onboardingSchema>) {
+export type OnboardingResult = {
+  householdId: string;
+  realEstateAccounts: { id: string; name: string; currentValue: number }[];
+};
+
+export async function completeOnboarding(
+  values: z.infer<typeof onboardingSchema>,
+): Promise<OnboardingResult> {
   assertWritable();
   const p = onboardingSchema.parse(values);
   const h = await getPrimaryHousehold();
 
+  const realEstateAccounts: OnboardingResult["realEstateAccounts"] = [];
+
   for (const a of p.accounts) {
-    await db.insert(schema.account).values({
-      householdId: h.id,
-      name: a.name,
-      kind: a.kind,
-      institution: a.institution || null,
-      currency: "EUR",
-      currentValue: a.currentValue,
-      ownership: "shared",
-      sharedSplitPct: 100,
-      annualYieldPct: a.annualYieldPct ?? null,
-      monthlyContribution: a.monthlyContribution ?? null,
-    });
+    const [row] = await db
+      .insert(schema.account)
+      .values({
+        householdId: h.id,
+        name: a.name,
+        kind: a.kind,
+        institution: a.institution || null,
+        currency: "EUR",
+        currentValue: a.currentValue,
+        ownership: "shared",
+        sharedSplitPct: 100,
+        annualYieldPct: a.annualYieldPct ?? null,
+        monthlyContribution: a.monthlyContribution ?? null,
+      })
+      .returning();
+    if (a.kind === "real_estate") {
+      realEstateAccounts.push({ id: row.id, name: row.name, currentValue: row.currentValue });
+    }
   }
 
   for (const i of p.incomes) {
@@ -79,4 +94,6 @@ export async function completeOnboarding(values: z.infer<typeof onboardingSchema
   revalidatePath("/");
   revalidatePath("/dashboard");
   revalidatePath("/accounts");
+
+  return { householdId: h.id, realEstateAccounts };
 }

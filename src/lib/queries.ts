@@ -216,6 +216,14 @@ export async function getAccountSnapshots(accountId: string) {
     .orderBy(asc(schema.accountSnapshot.date));
 }
 
+export async function getAccountCashflows(accountId: string) {
+  return db
+    .select()
+    .from(schema.accountCashflow)
+    .where(eq(schema.accountCashflow.accountId, accountId))
+    .orderBy(asc(schema.accountCashflow.date));
+}
+
 /**
  * Batch variant of {@link getAccountSnapshots}: fetches all snapshots for the
  * given accounts in a single SQL query and groups them by `accountId` in JS.

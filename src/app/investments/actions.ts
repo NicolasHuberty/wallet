@@ -181,6 +181,7 @@ export type RevolutTransactionImportOutcome = {
   holdingsUpdated: number;
   snapshotsCreated: number;
   snapshotsUpdated: number;
+  cashflowsImported: number;
   totals: {
     contributions: number;
     withdrawals: number;
@@ -295,6 +296,37 @@ export async function importRevolutTransactions(
       .where(eq(schema.account.id, p.accountId));
   }
 
+  // Persist cash flow events (idempotent re-import: delete prior import-sourced
+  // rows for this account, re-insert from the parsed CSV). Manual rows are
+  // preserved.
+  let cashflowsImported = 0;
+  if (result.events.length > 0) {
+    await db
+      .delete(schema.accountCashflow)
+      .where(
+        and(
+          eq(schema.accountCashflow.accountId, p.accountId),
+          eq(schema.accountCashflow.source, "revolut_import"),
+        ),
+      );
+    const rows = result.events.map((e) => ({
+      accountId: p.accountId,
+      date: e.date,
+      kind: e.kind,
+      amount: e.amount,
+      ticker: e.ticker ?? null,
+      notes: null,
+      source: "revolut_import" as const,
+      updatedAt: new Date(),
+    }));
+    // Chunk inserts to keep individual statements small.
+    const CHUNK = 500;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await db.insert(schema.accountCashflow).values(rows.slice(i, i + CHUNK));
+    }
+    cashflowsImported = rows.length;
+  }
+
   await recomputeSnapshot(acc.householdId);
   touch();
 
@@ -304,6 +336,7 @@ export async function importRevolutTransactions(
     holdingsUpdated,
     snapshotsCreated,
     snapshotsUpdated,
+    cashflowsImported,
     totals: {
       contributions: result.totals.contributions,
       withdrawals: result.totals.withdrawals,

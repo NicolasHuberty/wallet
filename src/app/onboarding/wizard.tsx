@@ -26,7 +26,9 @@ import {
   Coins,
   TrendingUp,
 } from "lucide-react";
-import { completeOnboarding } from "./actions";
+import { completeOnboarding, type OnboardingResult } from "./actions";
+import { PropertyWizard } from "../real-estate/property-wizard";
+import { Home } from "lucide-react";
 
 type DraftAccount = {
   name: string;
@@ -50,10 +52,11 @@ const STARTER_ACCOUNTS: { kind: AccountKind; name: string; suggestedValue: numbe
   { kind: "loan", name: "Prêt hypothécaire", suggestedValue: -180_000 },
 ];
 
-const STEP_LABELS: Record<1 | 2 | 3, string> = {
+const STEP_LABELS: Record<1 | 2 | 3 | 4, string> = {
   1: "Comptes",
   2: "Revenus",
   3: "Récapitulatif",
+  4: "Compléter biens",
 };
 
 const moneyInput = "h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm";
@@ -61,10 +64,12 @@ const textInput = "h-11 text-base md:h-8 md:text-sm";
 
 export function OnboardingWizard({ householdName }: { householdName: string }) {
   const router = useRouter();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [accounts, setAccounts] = useState<DraftAccount[]>([]);
   const [incomes, setIncomes] = useState<DraftIncome[]>([{ label: "Salaire", amount: "" }]);
   const [pending, start] = useTransition();
+  const [result, setResult] = useState<OnboardingResult | null>(null);
+  const [completedRealEstate, setCompletedRealEstate] = useState<Set<string>>(new Set());
 
   function addStarter(preset: (typeof STARTER_ACCOUNTS)[number]) {
     if (accounts.some((a) => a.kind === preset.kind && a.name === preset.name)) return;
@@ -141,9 +146,15 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
 
     start(async () => {
       try {
-        await completeOnboarding({ accounts: cleanAccounts, incomes: cleanIncomes });
+        const res = await completeOnboarding({ accounts: cleanAccounts, incomes: cleanIncomes });
+        setResult(res);
         toast.success("Bienvenue dans ton wallet !");
-        window.location.href = "/dashboard";
+        if (res.realEstateAccounts.length > 0) {
+          // Offer to complete each property file (frais notaire, prêt, etc.)
+          setStep(4);
+        } else {
+          window.location.href = "/dashboard";
+        }
       } catch (e) {
         toast.error((e as Error).message ?? "Erreur de création");
       }
@@ -158,7 +169,8 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
     .reduce((s, a) => s + Math.abs(Number(a.currentValue || 0)), 0);
   const totalIncome = incomes.reduce((s, i) => s + Number(i.amount || 0), 0);
 
-  const progressPct = (step / 3) * 100;
+  const totalSteps = result && result.realEstateAccounts.length > 0 ? 4 : 3;
+  const progressPct = (step / totalSteps) * 100;
 
   return (
     <div className="min-h-screen bg-background pb-[max(env(safe-area-inset-bottom,0px),1.5rem)] pt-[max(env(safe-area-inset-top,0px),1rem)] md:py-10">
@@ -180,7 +192,7 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
         <div className="mb-6 space-y-2 md:mb-8">
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium text-foreground">
-              Étape {step} / 3
+              Étape {step} / {totalSteps}
               <span className="ml-1.5 font-normal text-muted-foreground">· {STEP_LABELS[step]}</span>
             </span>
             <span className="tabular-nums text-muted-foreground">{Math.round(progressPct)}%</span>
@@ -601,16 +613,105 @@ export function OnboardingWizard({ householdName }: { householdName: string }) {
           </section>
         )}
 
-        {/* Skip link */}
-        <div className="mt-8 text-center">
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard")}
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Passer pour l&apos;instant — je configurerai depuis /accounts
-          </button>
-        </div>
+        {/* Step 4: complete real-estate properties */}
+        {step === 4 && result && (
+          <section className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold">Compléter tes biens immobiliers</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Pour chaque bien, on peut maintenant ajouter le prêt hypothécaire, les frais
+                d&apos;acquisition (notaire, droits d&apos;enregistrement, expertise…) et la valeur
+                actuelle. Tu peux le faire maintenant ou plus tard depuis la page <em>Immobilier</em>.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {result.realEstateAccounts.map((acc) => {
+                const done = completedRealEstate.has(acc.id);
+                return (
+                  <div
+                    key={acc.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div
+                        className={`flex size-9 items-center justify-center rounded-md ${
+                          done
+                            ? "bg-[var(--color-success)]/15 text-[var(--color-success)]"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {done ? <Check className="size-4" /> : <Home className="size-4" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{acc.name}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {done
+                            ? "Dossier complété (prêt + frais enregistrés)"
+                            : `Valeur actuelle : ${formatEUR(acc.currentValue)}`}
+                        </div>
+                      </div>
+                    </div>
+                    {!done && (
+                      <PropertyWizard
+                        householdId={result.householdId}
+                        existingAccount={{
+                          id: acc.id,
+                          name: acc.name,
+                          currentValue: acc.currentValue,
+                        }}
+                        onCompleted={(id) =>
+                          setCompletedRealEstate((prev) => {
+                            const next = new Set(prev);
+                            next.add(id);
+                            return next;
+                          })
+                        }
+                        trigger={
+                          <Button size="sm" variant="outline">
+                            Compléter ce bien <ArrowRight className="size-3.5" />
+                          </Button>
+                        }
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+              <strong>Astuce :</strong> compléter un bien permet d&apos;importer le tableau
+              d&apos;amortissement de la banque (PDF), de calculer le coût de revient (prix +
+              frais notaire/droits/expertise) et d&apos;afficher la plus-value nette future.
+            </div>
+
+            <div className="sticky bottom-[max(env(safe-area-inset-bottom,0px),0.75rem)] z-10 -mx-4 flex flex-col gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur supports-backdrop-filter:bg-background/80 md:static md:mx-0 md:flex-row md:items-center md:justify-between md:border-none md:bg-transparent md:p-0 md:backdrop-blur-none">
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Passer cette étape
+              </button>
+              <Button onClick={() => router.push("/dashboard")} className="w-full md:w-auto">
+                <Check className="size-4" /> Aller au dashboard
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {/* Skip link — hide on step 4 (own button) */}
+        {step !== 4 && (
+          <div className="mt-8 text-center">
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Passer pour l&apos;instant — je configurerai depuis /accounts
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

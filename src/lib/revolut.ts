@@ -333,10 +333,29 @@ export type RevolutInvestmentSnapshot = {
   positionValue: number;
 };
 
+export type RevolutCashflowKind =
+  | "deposit"
+  | "withdrawal"
+  | "dividend"
+  | "fee"
+  | "buy"
+  | "sell";
+
+export type RevolutInvestmentEvent = {
+  date: Date;
+  kind: RevolutCashflowKind;
+  amount: number; // signed: + = cash in, - = cash out
+  ticker?: string;
+  quantity?: number;
+  price?: number;
+  currency: string;
+};
+
 export type RevolutInvestmentResult = {
   format: "investment-transactions";
   holdings: RevolutInvestmentHolding[];
   snapshots: RevolutInvestmentSnapshot[];
+  events: RevolutInvestmentEvent[];
   totals: {
     contributions: number;
     withdrawals: number;
@@ -377,6 +396,7 @@ export function parseRevolutInvestmentCsv(raw: string): RevolutInvestmentResult 
     format: "investment-transactions",
     holdings: [],
     snapshots: [],
+    events: [],
     totals: {
       contributions: 0,
       withdrawals: 0,
@@ -584,10 +604,60 @@ export function parseRevolutInvestmentCsv(raw: string): RevolutInvestmentResult 
     warnings.push("Aucune transaction détectée");
   }
 
+  // Public events list — typed cash-flow events for downstream persistence
+  // (account_cashflow). Buy/sell sign convention: BUY = cash flowing OUT of
+  // the cash balance (negative), SELL = cash IN (positive). Deposits/dividends
+  // are positive, withdrawals/fees are negative.
+  const publicEvents: RevolutInvestmentEvent[] = [];
+  for (const e of events) {
+    if (e.kind === "OTHER") continue;
+    const cashFlow = Math.abs(e.amount);
+    let pubKind: RevolutCashflowKind;
+    let signed: number;
+    switch (e.kind) {
+      case "TOP_UP":
+        pubKind = "deposit";
+        signed = +cashFlow;
+        break;
+      case "WITHDRAWAL":
+        pubKind = "withdrawal";
+        signed = -cashFlow;
+        break;
+      case "DIVIDEND":
+        pubKind = "dividend";
+        signed = +cashFlow;
+        break;
+      case "FEE":
+        pubKind = "fee";
+        signed = -cashFlow;
+        break;
+      case "BUY":
+        pubKind = "buy";
+        signed = -cashFlow;
+        break;
+      case "SELL":
+        pubKind = "sell";
+        signed = +cashFlow;
+        break;
+      default:
+        continue;
+    }
+    publicEvents.push({
+      date: e.date,
+      kind: pubKind,
+      amount: signed,
+      ticker: e.ticker || undefined,
+      quantity: e.quantity || undefined,
+      price: e.price || undefined,
+      currency: e.currency || "EUR",
+    });
+  }
+
   return {
     format: "investment-transactions",
     holdings: Array.from(holdings.values()).sort((a, b) => a.ticker.localeCompare(b.ticker)),
     snapshots,
+    events: publicEvents,
     totals: {
       contributions,
       withdrawals,

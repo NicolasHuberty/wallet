@@ -144,6 +144,41 @@ export async function deleteAccountHistoryPoint(id: string, accountId: string) {
   revalidatePath("/accounts");
 }
 
+// ---------- Manual cash flow CRUD ----------
+
+const cashflowSchema = z.object({
+  accountId: z.string().min(1),
+  date: z.string().min(1),
+  kind: z.enum(schema.cashflowKind),
+  amount: z.coerce.number(),
+  ticker: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+export async function addCashflow(values: z.infer<typeof cashflowSchema>) {
+  assertWritable();
+  const p = cashflowSchema.parse(values);
+  const d = new Date(p.date);
+  d.setHours(12, 0, 0, 0);
+  await db.insert(schema.accountCashflow).values({
+    accountId: p.accountId,
+    date: d,
+    kind: p.kind,
+    amount: p.amount,
+    ticker: p.ticker || null,
+    notes: p.notes || null,
+    source: "manual",
+    updatedAt: new Date(),
+  });
+  revalidatePath(`/accounts/${p.accountId}`);
+}
+
+export async function deleteCashflow(id: string, accountId: string) {
+  assertWritable();
+  await db.delete(schema.accountCashflow).where(eq(schema.accountCashflow.id, id));
+  revalidatePath(`/accounts/${accountId}`);
+}
+
 // ---------- Revolut savings statement import ----------
 // Imports the flat French savings statement CSV into a savings (or cash)
 // account: writes one accountSnapshot per calendar day from the running

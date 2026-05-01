@@ -4,8 +4,12 @@ import { PageHeader } from "@/components/page-header";
 import {
   getAccount,
   getAccountSnapshots,
+  getAccountCashflows,
   getHoldings,
 } from "@/lib/queries";
+import { buildPerfReport, type PerfCashflow } from "@/lib/performance";
+import { InvestmentPerfPanel } from "./perf-panel";
+import { CashflowList } from "./cashflow-list";
 import { db, schema } from "@/db";
 import { eq } from "drizzle-orm";
 import { formatEUR, formatDateFR } from "@/lib/format";
@@ -33,6 +37,20 @@ export default async function AccountDetailPage({
 
   const snaps = await getAccountSnapshots(acc.id);
   const holdings = await getHoldings(acc.id);
+  const isInvestmentLike =
+    acc.kind === "brokerage" || acc.kind === "retirement" || acc.kind === "crypto";
+  const cashflows = isInvestmentLike ? await getAccountCashflows(acc.id) : [];
+  const perfReport = isInvestmentLike
+    ? buildPerfReport(
+        snaps.map((s) => ({ date: toDate(s.date), value: s.value })),
+        cashflows.map((c) => ({
+          date: toDate(c.date),
+          amount: c.amount,
+          kind: c.kind as PerfCashflow["kind"],
+        })),
+        acc.currentValue,
+      )
+    : null;
 
   // Property appreciation rate if applicable
   let appreciationPct: number | null = null;
@@ -157,14 +175,26 @@ export default async function AccountDetailPage({
             positive={yoyDelta != null && yoyDelta > 0}
             negative={yoyDelta != null && yoyDelta < 0}
           />
-          <Kpi
-            label="CAGR"
-            value={cagr != null ? `${cagr >= 0 ? "+" : ""}${cagr.toFixed(2)} %` : "—"}
-            hint={firstDate ? `depuis ${formatDateFR(firstDate)}` : undefined}
-            positive={cagr != null && cagr > 0}
-            negative={cagr != null && cagr < 0}
-          />
+          {isInvestmentLike ? (
+            <Kpi
+              label="Croissance brute"
+              value={cagr != null ? `${cagr >= 0 ? "+" : ""}${cagr.toFixed(2)} %` : "—"}
+              hint="ne tient pas compte des dépôts — voir TWR/XIRR"
+            />
+          ) : (
+            <Kpi
+              label="CAGR"
+              value={cagr != null ? `${cagr >= 0 ? "+" : ""}${cagr.toFixed(2)} %` : "—"}
+              hint={firstDate ? `depuis ${formatDateFR(firstDate)}` : undefined}
+              positive={cagr != null && cagr > 0}
+              negative={cagr != null && cagr < 0}
+            />
+          )}
         </section>
+
+        {perfReport && (
+          <InvestmentPerfPanel report={perfReport} annualYieldPct={acc.annualYieldPct} />
+        )}
 
         <section className="rounded-xl border border-border bg-card p-4 md:p-5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 md:mb-4">
@@ -326,6 +356,21 @@ export default async function AccountDetailPage({
             )}
           </Panel>
         </section>
+
+        {isInvestmentLike && (
+          <CashflowList
+            accountId={acc.id}
+            rows={cashflows.map((c) => ({
+              id: c.id,
+              date: c.date as unknown as Date,
+              kind: c.kind,
+              amount: c.amount,
+              ticker: c.ticker,
+              notes: c.notes,
+              source: c.source,
+            }))}
+          />
+        )}
 
         {holdings.length > 0 && (
           <section className="rounded-xl border border-border bg-card">

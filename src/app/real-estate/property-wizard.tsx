@@ -176,10 +176,35 @@ function Stat({ label, value }: { label: string; value: string }) {
 const moneyInput = "h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm";
 const textInput = "h-11 text-base md:h-8 md:text-sm";
 
-export function PropertyWizard({ householdId, trigger }: { householdId: string; trigger?: React.ReactNode }) {
+export function PropertyWizard({
+  householdId,
+  trigger,
+  existingAccount,
+  onCompleted,
+}: {
+  householdId: string;
+  trigger?: React.ReactNode;
+  // If set, the wizard completes (= attaches property + mortgage + charges to)
+  // an existing real_estate account instead of creating a brand-new one.
+  existingAccount?: { id: string; name: string; currentValue: number };
+  // Called once the property dossier has been successfully created. Receives
+  // the original account id (existing or freshly created) so a parent SPA can
+  // mark the row as done.
+  onCompleted?: (accountId: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<WizardState>(initialState());
+  const [form, setForm] = useState<WizardState>(() => {
+    const s = initialState();
+    if (existingAccount) {
+      s.name = existingAccount.name;
+      if (existingAccount.currentValue > 0) {
+        s.currentValue = existingAccount.currentValue;
+        s.purchasePrice = existingAccount.currentValue;
+      }
+    }
+    return s;
+  });
   const [pending, start] = useTransition();
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -263,8 +288,9 @@ export function PropertyWizard({ householdId, trigger }: { householdId: string; 
   async function submit() {
     start(async () => {
       try {
-        await createFullProperty({
+        const res = await createFullProperty({
           householdId,
+          existingAccountId: existingAccount?.id ?? null,
           property: {
             name: form.name,
             address: form.address || null,
@@ -300,6 +326,7 @@ export function PropertyWizard({ householdId, trigger }: { householdId: string; 
         if (enabledCharges.length > 0) parts.push(`${enabledCharges.length} frais`);
         if (form.pdfExtraction) parts.push(`${form.pdfExtraction.rows.length} échéances`);
         toast.success(parts.join(" + "));
+        onCompleted?.(res.accountId);
         setOpen(false);
         reset();
       } catch (e) {
@@ -317,7 +344,17 @@ export function PropertyWizard({ householdId, trigger }: { householdId: string; 
       <SheetTrigger render={trigger as React.ReactElement ?? <Button size="sm"><Plus className="size-4" /> Nouveau bien</Button>} />
       <SheetContent desktopSize="md:max-w-3xl">
         <SheetHeader>
-          <SheetTitle>Onboarding — nouveau bien immobilier</SheetTitle>
+          <SheetTitle>
+            {existingAccount
+              ? `Compléter ce bien — ${existingAccount.name}`
+              : "Onboarding — nouveau bien immobilier"}
+          </SheetTitle>
+          {existingAccount && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              On enrichit le compte existant avec les détails du bien, le prêt et les frais. Aucun
+              compte supplémentaire ne sera créé sauf si tu ajoutes un prêt.
+            </p>
+          )}
           {/* Progress + step pill */}
           <div className="mt-2 space-y-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground">

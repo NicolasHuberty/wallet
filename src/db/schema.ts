@@ -463,6 +463,54 @@ export const accountSnapshot = pgTable(
   (t) => [index("account_snapshot_account_id_date_idx").on(t.accountId, t.date)],
 );
 
+// External cash flows on an account (deposits / withdrawals / dividends /
+// fees / buys / sells). Used to compute time-weighted return (TWR), money-
+// weighted return (XIRR) and net deposits — i.e. performance metrics that are
+// independent of the user's own contributions. Source distinguishes import-
+// generated rows (idempotent re-import = delete-then-insert by source) from
+// manually entered ones.
+export const cashflowKind = [
+  "deposit",
+  "withdrawal",
+  "dividend",
+  "fee",
+  "interest",
+  "buy",
+  "sell",
+  "transfer_in",
+  "transfer_out",
+  "other",
+] as const;
+export type CashflowKind = (typeof cashflowKind)[number];
+
+export const cashflowSource = ["revolut_import", "manual", "checkin"] as const;
+export type CashflowSource = (typeof cashflowSource)[number];
+
+export const accountCashflow = pgTable(
+  "account_cashflow",
+  {
+    id: id(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => account.id, { onDelete: "cascade" }),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    kind: text("kind", { enum: cashflowKind }).notNull(),
+    // Signed amount. Positive = cash flowed INTO the account from outside (or
+    // realized profit); negative = cash left the account. For BUY/SELL events
+    // we store the absolute amount with sign matching the cash impact:
+    // BUY = negative (cash out of account into a position), SELL = positive.
+    amount: real("amount").notNull(),
+    ticker: text("ticker"),
+    notes: text("notes"),
+    source: text("source", { enum: cashflowSource }).notNull().default("manual"),
+    ...timestamps,
+  },
+  (t) => [
+    index("account_cashflow_account_id_date_idx").on(t.accountId, t.date),
+    index("account_cashflow_account_id_source_idx").on(t.accountId, t.source),
+  ],
+);
+
 export const netWorthSnapshot = pgTable(
   "net_worth_snapshot",
   {
