@@ -18,6 +18,8 @@ import {
 import { InvestmentPerfPanel } from "./perf-panel";
 import { CashflowList } from "./cashflow-list";
 import { BankAnalyticsPanel } from "./bank-analytics-panel";
+import { TransactionTable } from "./transaction-table";
+import { OnboardingReviewBanner } from "./onboarding-review";
 import { ValueVsDepositsChart } from "./value-vs-deposits-chart";
 import { AllocationDonut } from "./allocation-donut";
 import { CashflowBars } from "./cashflow-bars";
@@ -241,6 +243,20 @@ export default async function AccountDetailPage({
         )}
 
         {isBankSynced && (
+          <OnboardingReviewBanner
+            rows={cashflows.map((c) => ({
+              id: c.id,
+              date: c.date as unknown as Date,
+              amount: c.amount,
+              notes: c.notes,
+              category: c.category,
+              categorySource: c.categorySource,
+              bceEnterpriseNumber: c.bceEnterpriseNumber,
+            }))}
+          />
+        )}
+
+        {isBankSynced && (
           <BankAnalyticsPanel
             accountId={acc.id}
             rows={cashflows.map((c) => ({
@@ -321,7 +337,24 @@ export default async function AccountDetailPage({
           </section>
         )}
 
-        {(isInvestmentLike || isBankSynced) && (
+        {isBankSynced && (
+          <TransactionTable
+            rows={cashflows.map((c) => ({
+              id: c.id,
+              date: c.date as unknown as Date,
+              kind: c.kind,
+              amount: c.amount,
+              ticker: c.ticker,
+              notes: c.notes,
+              category: c.category,
+              categorySource: c.categorySource,
+              bceEnterpriseNumber: c.bceEnterpriseNumber,
+              source: c.source,
+            }))}
+          />
+        )}
+
+        {isInvestmentLike && !isBankSynced && (
           <CashflowList
             accountId={acc.id}
             rows={cashflows.map((c) => ({

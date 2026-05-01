@@ -540,6 +540,50 @@ export const accountCashflow = pgTable(
   ],
 );
 
+// User-defined categorisation rules — the "feedback loop" that captures
+// each manual override the user does. On every (re-)categorisation pass we
+// apply rules in priority order BEFORE BCE / regex / fallback layers. Rules
+// are scoped to a household.
+//
+// matcherType:
+//  - 'counterparty_exact'      pattern matches normalised counterparty name
+//  - 'counterparty_substring'  pattern is a substring of normalised cp
+//  - 'description_keyword'     pattern is found anywhere in lowercase notes
+//  - 'iban_exact'              pattern equals the counterparty IBAN
+//  - 'bce_enterprise'          pattern is a BCE enterprise number (10 digits)
+export const categoryRuleMatcherType = [
+  "counterparty_exact",
+  "counterparty_substring",
+  "description_keyword",
+  "iban_exact",
+  "bce_enterprise",
+] as const;
+export type CategoryRuleMatcherType = (typeof categoryRuleMatcherType)[number];
+
+export const categoryRule = pgTable(
+  "category_rule",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    matcherType: text("matcher_type", { enum: categoryRuleMatcherType }).notNull(),
+    pattern: text("pattern").notNull(), // already normalised (lowercase, no diacritics)
+    category: text("category").notNull(),
+    // Lower number = higher priority. Exact rules default 10, substrings 50.
+    priority: integer("priority").notNull().default(50),
+    // How many cashflows the rule has matched so far (incremented at apply
+    // time). Used to surface "your most-used rules" in the rules manager.
+    hitCount: integer("hit_count").notNull().default(0),
+    notes: text("notes"),
+    ...timestamps,
+  },
+  (t) => [
+    index("category_rule_household_id_idx").on(t.householdId),
+    index("category_rule_household_pattern_idx").on(t.householdId, t.matcherType, t.pattern),
+  ],
+);
+
 // Belgian Crossroads Bank for Enterprises (BCE / KBO) — bulk-imported
 // monthly CSV dump from https://kbopub.economie.fgov.be/kbo-open-data/.
 // Used to look up the NACE-BEL activity code of a transaction's

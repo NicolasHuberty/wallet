@@ -1,7 +1,7 @@
 "use server";
 
 import { db, schema } from "@/db";
-import { and, eq, inArray, lte, gte, isNull } from "drizzle-orm";
+import { and, eq, inArray, lte, gte, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -24,6 +24,7 @@ import {
 import type { CashflowKind } from "@/db/schema";
 import {
   classifyTransaction,
+  transactionCategory,
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
 import {
@@ -31,6 +32,11 @@ import {
   naceToCategory,
   normalizeBceName,
 } from "@/lib/bce";
+import {
+  applyCategoryToSimilarCashflows,
+  resolveCategoriesBatchV2,
+  type CategorizationInput,
+} from "@/lib/categorization";
 
 function requireConfigured() {
   if (!isConfigured()) {
@@ -183,7 +189,9 @@ type ResolvedCategory = {
   bceEnterpriseNumber: string | null;
 };
 
-async function resolveCategoriesBatch(
+// Legacy batch resolver — kept for backwards compatibility but the v2
+// orchestrator (rules → BCE deep → regex) is now the canonical path.
+async function _resolveCategoriesBatchLegacy(
   inputs: Array<{ amount: number; notes: string | null; counterparty: string | null; kind: CashflowKind }>,
 ): Promise<ResolvedCategory[]> {
   // Build the set of unique normalised search names from counterparty fields
@@ -361,11 +369,13 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
           counterparty: txCounterpartyName(t),
         });
       }
-      const resolved = await resolveCategoriesBatch(
+      const resolved = await resolveCategoriesBatchV2(
+        h.id,
         prepared.map((p) => ({
           amount: p.amount,
           notes: p.notes,
           counterparty: p.counterparty,
+          iban: null, // not surfaced today; rule.iban_exact rarely used
           kind: p.kind,
         })),
       );
@@ -501,7 +511,7 @@ const recatSchema = z.object({ accountId: z.string().min(1) });
 
 export async function recategorizeAccount(
   values: z.infer<typeof recatSchema>,
-): Promise<{ updated: number; bceMatches: number }> {
+): Promise<{ updated: number; bceMatches: number; ruleMatches: number }> {
   assertWritable();
   const p = recatSchema.parse(values);
   const h = await getPrimaryHousehold();
@@ -518,36 +528,40 @@ export async function recategorizeAccount(
 
   // Skip user-overridden rows
   const target = rows.filter((r) => r.categorySource !== "user");
-  if (target.length === 0) return { updated: 0, bceMatches: 0 };
+  if (target.length === 0) return { updated: 0, bceMatches: 0, ruleMatches: 0 };
 
-  const resolved = await resolveCategoriesBatch(
+  const resolved = await resolveCategoriesBatchV2(
+    h.id,
     target.map((r) => ({
       amount: r.amount,
       notes: r.notes,
-      counterparty: r.notes, // we don't store counterparty separately yet — use notes
+      counterparty: r.notes, // counterparty not separately stored — use notes
+      iban: null,
       kind: r.kind as CashflowKind,
     })),
   );
 
   let bceMatches = 0;
+  let ruleMatches = 0;
   const now = new Date();
   for (let i = 0; i < target.length; i++) {
     const r = target[i];
     const cat = resolved[i];
     if (cat.source === "bce") bceMatches++;
+    if (cat.source === "user_rule") ruleMatches++;
     await db
       .update(schema.accountCashflow)
       .set({
         category: cat.category,
         categorySource: cat.source,
-        bceEnterpriseNumber: cat.bceEnterpriseNumber,
+        bceEnterpriseNumber: cat.bceEnterpriseNumber ?? null,
         updatedAt: now,
       })
       .where(eq(schema.accountCashflow.id, r.id));
   }
 
   revalidatePath(`/accounts/${acc.id}`);
-  return { updated: target.length, bceMatches };
+  return { updated: target.length, bceMatches, ruleMatches };
 }
 
 // ─── Manual override of a single cashflow's category ─────────────────
@@ -586,6 +600,241 @@ export async function setCashflowCategory(
     .where(eq(schema.accountCashflow.id, p.cashflowId));
 
   revalidatePath(`/accounts/${row.accountId}`);
+}
+
+// ─── Set category + optionally create a rule + apply to similar ──────
+// The full "feedback loop" entry-point.  The user fixes one tx and decides
+// what scope the correction should apply to.
+
+const setCategoryRuleSchema = z.object({
+  cashflowId: z.string().min(1),
+  category: z.enum(transactionCategory),
+  applyTo: z.enum(["this_only", "similar_counterparty", "similar_description"]),
+  createRule: z.boolean().default(true),
+  customPattern: z.string().optional().nullable(),
+});
+
+export async function setCashflowCategoryWithRule(
+  values: z.infer<typeof setCategoryRuleSchema>,
+) {
+  assertWritable();
+  const p = setCategoryRuleSchema.parse(values);
+  const h = await getPrimaryHousehold();
+
+  // Verify ownership + fetch counterparty source
+  const [row] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      notes: schema.accountCashflow.notes,
+      bceEnterpriseNumber: schema.accountCashflow.bceEnterpriseNumber,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  if (!row || row.householdId !== h.id) throw new Error("Mouvement introuvable");
+
+  // Always set the immediate row first (categorySource='user')
+  await db
+    .update(schema.accountCashflow)
+    .set({
+      category: p.category,
+      categorySource: "user",
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+
+  let bulkUpdated = 0;
+  let ruleId: string | null = null;
+
+  if (p.applyTo !== "this_only") {
+    const norm = normalizeBceName(row.notes ?? "");
+    const desc = (row.notes ?? "").toLowerCase();
+    const pattern =
+      p.customPattern && p.customPattern.length > 0
+        ? p.customPattern.toLowerCase()
+        : p.applyTo === "similar_counterparty"
+          ? norm
+          : desc.split(/\s+/).filter((t) => t.length >= 4)[0] ?? norm;
+
+    if (pattern && pattern.length >= 3) {
+      const matcherType =
+        p.applyTo === "similar_counterparty"
+          ? "counterparty_exact"
+          : "description_keyword";
+
+      // Optionally persist the rule (so future syncs get it)
+      if (p.createRule) {
+        // De-dupe: same household + matcherType + pattern → update category
+        const existing = await db
+          .select()
+          .from(schema.categoryRule)
+          .where(
+            and(
+              eq(schema.categoryRule.householdId, h.id),
+              eq(schema.categoryRule.matcherType, matcherType),
+              eq(schema.categoryRule.pattern, pattern),
+            ),
+          );
+        if (existing[0]) {
+          await db
+            .update(schema.categoryRule)
+            .set({ category: p.category, updatedAt: new Date() })
+            .where(eq(schema.categoryRule.id, existing[0].id));
+          ruleId = existing[0].id;
+        } else {
+          const [created] = await db
+            .insert(schema.categoryRule)
+            .values({
+              householdId: h.id,
+              matcherType,
+              pattern,
+              category: p.category,
+              priority: matcherType === "counterparty_exact" ? 10 : 50,
+              updatedAt: new Date(),
+            })
+            .returning();
+          ruleId = created.id;
+        }
+      }
+
+      // Apply to all similar past cashflows
+      const r = await applyCategoryToSimilarCashflows(
+        h.id,
+        { type: matcherType, pattern },
+        p.category,
+      );
+      bulkUpdated = r.updated;
+    }
+  }
+
+  revalidatePath(`/accounts/${row.accountId}`);
+  return { ruleId, bulkUpdated };
+}
+
+// ─── Manually link a cashflow to a BCE company ───────────────────────
+// Useful when the auto-match missed (unusual phrasing, abbreviation).
+// Sets the category from NACE and creates a `bce_enterprise` rule so
+// any future tx with the same BCE link gets auto-categorised.
+
+const linkBceSchema = z.object({
+  cashflowId: z.string().min(1),
+  enterpriseNumber: z.string().min(1),
+});
+
+export async function linkCashflowToBce(values: z.infer<typeof linkBceSchema>) {
+  assertWritable();
+  const p = linkBceSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const [row] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      notes: schema.accountCashflow.notes,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  if (!row || row.householdId !== h.id) throw new Error("Mouvement introuvable");
+
+  const [company] = await db
+    .select()
+    .from(schema.bceCompany)
+    .where(eq(schema.bceCompany.enterpriseNumber, p.enterpriseNumber));
+  if (!company) throw new Error("Société BCE introuvable");
+
+  const cat = naceToCategory(company.naceCode);
+  if (!cat) throw new Error("Pas de catégorie pour ce code NACE");
+
+  await db
+    .update(schema.accountCashflow)
+    .set({
+      category: cat,
+      categorySource: "user",
+      bceEnterpriseNumber: company.enterpriseNumber,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+
+  // Persist a counterparty_exact rule so future txns from the same merchant
+  // are auto-classified — based on the normalised note we have today.
+  const norm = normalizeBceName(row.notes ?? "");
+  if (norm.length >= 3) {
+    const existing = await db
+      .select()
+      .from(schema.categoryRule)
+      .where(
+        and(
+          eq(schema.categoryRule.householdId, h.id),
+          eq(schema.categoryRule.matcherType, "counterparty_exact"),
+          eq(schema.categoryRule.pattern, norm),
+        ),
+      );
+    if (!existing[0]) {
+      await db.insert(schema.categoryRule).values({
+        householdId: h.id,
+        matcherType: "counterparty_exact",
+        pattern: norm,
+        category: cat,
+        priority: 10,
+        notes: `Auto-créé via lien BCE: ${company.denomination}`,
+        updatedAt: new Date(),
+      });
+    }
+  }
+
+  revalidatePath(`/accounts/${row.accountId}`);
+  return { category: cat, denomination: company.denomination };
+}
+
+// ─── Autocomplete BCE companies (search-as-you-type) ─────────────────
+const searchBceSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).default(15),
+});
+
+export async function searchBceCompanies(values: z.infer<typeof searchBceSchema>) {
+  const p = searchBceSchema.parse(values);
+  const norm = normalizeBceName(p.query);
+  if (norm.length < 2) return [];
+  const rows = await db
+    .select({
+      enterpriseNumber: schema.bceCompany.enterpriseNumber,
+      denomination: schema.bceCompany.denomination,
+      commercialName: schema.bceCompany.commercialName,
+      naceCode: schema.bceCompany.naceCode,
+      naceDescription: schema.bceCompany.naceDescription,
+    })
+    .from(schema.bceCompany)
+    .where(sql`${schema.bceCompany.searchName} LIKE ${norm + "%"}`)
+    .limit(p.limit);
+  return rows;
+}
+
+// ─── Rules manager: list / delete ────────────────────────────────────
+
+export async function listCategoryRules() {
+  const h = await getPrimaryHousehold();
+  return db
+    .select()
+    .from(schema.categoryRule)
+    .where(eq(schema.categoryRule.householdId, h.id));
+}
+
+export async function deleteCategoryRule(ruleId: string) {
+  assertWritable();
+  const h = await getPrimaryHousehold();
+  await db
+    .delete(schema.categoryRule)
+    .where(
+      and(
+        eq(schema.categoryRule.id, ruleId),
+        eq(schema.categoryRule.householdId, h.id),
+      ),
+    );
+  revalidatePath("/banking");
 }
 
 // ─── Disconnect / delete a bank connection ────────────────────────────

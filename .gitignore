@@ -58,3 +58,6 @@ next-env.d.ts
 
 # user-specific CSV exports / statements at the repo root (personal data)
 /*.csv
+# KBO open-data dumps (300+ MB each)
+/KboOpenData_*.zip
+/kbo-extracted/
