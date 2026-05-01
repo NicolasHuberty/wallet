@@ -17,6 +17,7 @@ import {
 } from "@/lib/charts-data";
 import { InvestmentPerfPanel } from "./perf-panel";
 import { CashflowList } from "./cashflow-list";
+import { BankAnalyticsPanel } from "./bank-analytics-panel";
 import { ValueVsDepositsChart } from "./value-vs-deposits-chart";
 import { AllocationDonut } from "./allocation-donut";
 import { CashflowBars } from "./cashflow-bars";
@@ -51,7 +52,9 @@ export default async function AccountDetailPage({
   const holdings = await getHoldings(acc.id);
   const isInvestmentLike =
     acc.kind === "brokerage" || acc.kind === "retirement" || acc.kind === "crypto";
-  const cashflows = isInvestmentLike ? await getAccountCashflows(acc.id) : [];
+  const isCashLike = acc.kind === "cash" || acc.kind === "savings";
+  const cashflows = isInvestmentLike || isCashLike ? await getAccountCashflows(acc.id) : [];
+  const isBankSynced = isCashLike && cashflows.length > 0;
   const perfSnaps = snaps.map((s) => ({ date: toDate(s.date), value: s.value }));
   const perfCfs = cashflows.map((c) => ({
     date: toDate(c.date),
@@ -237,6 +240,19 @@ export default async function AccountDetailPage({
           />
         )}
 
+        {isBankSynced && (
+          <BankAnalyticsPanel
+            rows={cashflows.map((c) => ({
+              id: c.id,
+              date: c.date as unknown as Date,
+              amount: c.amount,
+              notes: c.notes,
+              ticker: c.ticker,
+              kind: c.kind as never,
+            }))}
+          />
+        )}
+
         {isInvestmentLike ? (
           <>
             {/* Hero chart — value vs cumulative net deposits + plus-value */}
@@ -302,7 +318,7 @@ export default async function AccountDetailPage({
           </section>
         )}
 
-        {isInvestmentLike && (
+        {(isInvestmentLike || isBankSynced) && (
           <CashflowList
             accountId={acc.id}
             rows={cashflows.map((c) => ({
