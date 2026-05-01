@@ -57,6 +57,15 @@ export default async function AccountDetailPage({
   const isCashLike = acc.kind === "cash" || acc.kind === "savings";
   const cashflows = isInvestmentLike || isCashLike ? await getAccountCashflows(acc.id) : [];
   const isBankSynced = isCashLike && cashflows.length > 0;
+  // All other household accounts — used by the transaction editor to let
+  // the user mark a transaction as an internal transfer to another of
+  // their accounts (eg. money moved into a savings account).
+  const householdAccounts = isBankSynced
+    ? (await db
+        .select({ id: schema.account.id, name: schema.account.name, kind: schema.account.kind })
+        .from(schema.account)
+        .where(eq(schema.account.householdId, acc.householdId))).filter((a) => a.id !== acc.id)
+    : [];
   const perfSnaps = snaps.map((s) => ({ date: toDate(s.date), value: s.value }));
   const perfCfs = cashflows.map((c) => ({
     date: toDate(c.date),
@@ -244,6 +253,7 @@ export default async function AccountDetailPage({
 
         {isBankSynced && (
           <OnboardingReviewBanner
+            householdAccounts={householdAccounts}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -252,6 +262,7 @@ export default async function AccountDetailPage({
               category: c.category,
               categorySource: c.categorySource,
               bceEnterpriseNumber: c.bceEnterpriseNumber,
+              transferToAccountId: c.transferToAccountId,
             }))}
           />
         )}
@@ -339,6 +350,7 @@ export default async function AccountDetailPage({
 
         {isBankSynced && (
           <TransactionTable
+            householdAccounts={householdAccounts}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -349,6 +361,7 @@ export default async function AccountDetailPage({
               category: c.category,
               categorySource: c.categorySource,
               bceEnterpriseNumber: c.bceEnterpriseNumber,
+              transferToAccountId: c.transferToAccountId,
               source: c.source,
             }))}
           />

@@ -21,7 +21,7 @@ import {
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
 import { setCashflowCategoryWithRule } from "@/app/banking/actions";
-import { TransactionEditDialog } from "./transaction-edit-dialog";
+import { TransactionEditDialog, type HouseholdAccountOption } from "./transaction-edit-dialog";
 
 type Cashflow = {
   id: string;
@@ -31,6 +31,7 @@ type Cashflow = {
   category: string | null;
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
+  transferToAccountId?: string | null;
 };
 
 // Quick-pick categories — the most common ones for personal banking.
@@ -62,8 +63,10 @@ const QUICK_INCOME: TransactionCategory[] = [
 
 export function OnboardingReviewBanner({
   rows,
+  householdAccounts = [],
 }: {
   rows: Cashflow[];
+  householdAccounts?: HouseholdAccountOption[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -124,6 +127,7 @@ export function OnboardingReviewBanner({
         open={open}
         onOpenChange={setOpen}
         rows={toReview}
+        householdAccounts={householdAccounts}
       />
     </>
   );
@@ -133,10 +137,12 @@ function ReviewWizard({
   open,
   onOpenChange,
   rows,
+  householdAccounts,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   rows: Cashflow[];
+  householdAccounts: HouseholdAccountOption[];
 }) {
   const router = useRouter();
   const [idx, setIdx] = useState(0);
@@ -173,6 +179,41 @@ function ReviewWizard({
       }
     });
   }
+
+  function pickTransfer(targetAccountId: string, targetName: string) {
+    if (!current) return;
+    start(async () => {
+      try {
+        const r = await setCashflowCategoryWithRule({
+          cashflowId: current.id,
+          category: "transfer_internal",
+          applyTo: "similar_counterparty",
+          createRule: true,
+          transferToAccountId: targetAccountId,
+        });
+        if (r.bulkUpdated > 1)
+          toast.success(
+            `${r.bulkUpdated} virements vers "${targetName}" liés (et exclus des dépenses)`,
+          );
+        else toast.success(`Virement vers "${targetName}" enregistré`);
+        advance();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
+  // Heuristic — flag transactions that look like internal transfers so we
+  // can offer a one-click "transfer to ..." button alongside the category
+  // picks. Same regex used by the auto-detector at sync time.
+  function detectLocalTransferHint(notes: string | null): boolean {
+    if (!notes) return false;
+    return /(compte d epargne|d epargne|savings|spaarrek|virement|to compte|from compte|transfer to|transfer from|vers compte|depuis compte)/i.test(
+      notes,
+    );
+  }
+  const showTransferButtons =
+    householdAccounts.length > 0 && current && detectLocalTransferHint(current.notes);
 
   if (!current) return null;
   const positive = current.amount >= 0;
@@ -227,6 +268,35 @@ function ReviewWizard({
                 </div>
               )}
             </div>
+
+            {/* Internal-transfer suggestion (when description hints at it) */}
+            {showTransferButtons && (
+              <div className="rounded-lg border border-[var(--chart-2)]/40 bg-[var(--chart-2)]/5 p-3">
+                <p className="mb-2 text-xs font-semibold">
+                  ↔ Cette transaction ressemble à un virement vers un autre de tes comptes
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  {householdAccounts.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => pickTransfer(a.id, a.name)}
+                      disabled={pending}
+                      className="flex items-center justify-between gap-2 rounded-md border border-[var(--chart-2)]/40 bg-background p-2.5 text-left text-xs transition-colors hover:border-foreground disabled:opacity-50"
+                    >
+                      <span className="flex items-center gap-2">
+                        <CheckCircle2 className="size-3.5 text-[var(--chart-2)]" />
+                        <span className="font-medium">Vers {a.name}</span>
+                        <span className="text-[10px] text-muted-foreground">({a.kind})</span>
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        crée règle + applique aux similaires
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Quick-pick category */}
             <div>
@@ -289,6 +359,7 @@ function ReviewWizard({
           if (!o) advance();
         }}
         cashflow={current}
+        householdAccounts={householdAccounts}
       />
     </>
   );

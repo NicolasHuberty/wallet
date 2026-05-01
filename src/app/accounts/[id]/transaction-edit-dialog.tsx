@@ -44,7 +44,10 @@ type Cashflow = {
   category: string | null;
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
+  transferToAccountId?: string | null;
 };
+
+export type HouseholdAccountOption = { id: string; name: string; kind: string };
 
 type BceCandidate = {
   enterpriseNumber: string;
@@ -66,10 +69,12 @@ export function TransactionEditDialog({
   open,
   onOpenChange,
   cashflow,
+  householdAccounts = [],
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cashflow: Cashflow | null;
+  householdAccounts?: HouseholdAccountOption[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -79,6 +84,9 @@ export function TransactionEditDialog({
   const [applyTo, setApplyTo] = useState<"this_only" | "similar_counterparty" | "similar_description">(
     "similar_counterparty",
   );
+  const [transferTo, setTransferTo] = useState<string | null>(
+    cashflow?.transferToAccountId ?? null,
+  );
   const [bceQuery, setBceQuery] = useState("");
   const [bceCandidates, setBceCandidates] = useState<BceCandidate[]>([]);
   const [bceSearching, setBceSearching] = useState(false);
@@ -87,10 +95,11 @@ export function TransactionEditDialog({
   useEffect(() => {
     if (cashflow?.category) setCategory(cashflow.category as TransactionCategory);
     setApplyTo("similar_counterparty");
+    setTransferTo(cashflow?.transferToAccountId ?? null);
     setBceQuery("");
     setBceCandidates([]);
     setShowBce(false);
-  }, [cashflow?.id, cashflow?.category]);
+  }, [cashflow?.id, cashflow?.category, cashflow?.transferToAccountId]);
 
   // Debounced BCE search
   useEffect(() => {
@@ -118,9 +127,12 @@ export function TransactionEditDialog({
       try {
         const r = await setCashflowCategoryWithRule({
           cashflowId: cashflow.id,
-          category,
+          // If a transfer target is picked, force the category to
+          // transfer_internal regardless of what's in the dropdown.
+          category: transferTo ? "transfer_internal" : category,
           applyTo,
           createRule: applyTo !== "this_only",
+          transferToAccountId: transferTo,
         });
         if (r.bulkUpdated > 0)
           toast.success(
@@ -198,11 +210,50 @@ export function TransactionEditDialog({
             )}
           </div>
 
-          {/* Quick category picker */}
+          {/* Internal transfer link — shown FIRST when there are other
+              household accounts available, since it's often the right
+              answer for negative transactions like "to savings". */}
+          {householdAccounts.length > 0 && (
+            <div className="rounded-lg border border-[var(--chart-2)]/40 bg-[var(--chart-2)]/5 p-3">
+              <Label className="text-xs font-semibold">
+                Virement vers un autre compte du ménage
+              </Label>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Choisis un compte si l&apos;argent ne quitte pas vraiment ton patrimoine — il sera
+                exclu des dépenses analytiques.
+              </p>
+              <Select
+                value={transferTo ?? "none"}
+                onValueChange={(v) => setTransferTo(v && v !== "none" ? v : null)}
+              >
+                <SelectTrigger className="mt-2 h-9">
+                  <SelectValue placeholder="Pas un virement interne" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Pas un virement interne —</SelectItem>
+                  {householdAccounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}{" "}
+                      <span className="text-[10px] text-muted-foreground">({a.kind})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Quick category picker — disabled visually when transferTo is set */}
           <div className="grid gap-2">
-            <Label className="text-xs">Catégorie</Label>
+            <Label className="text-xs">
+              Catégorie {transferTo && (
+                <span className="text-muted-foreground">
+                  (forcée à « Virement interne »)
+                </span>
+              )}
+            </Label>
             <Select
-              value={category}
+              value={transferTo ? "transfer_internal" : category}
+              disabled={!!transferTo}
               onValueChange={(v) => setCategory((v as TransactionCategory) ?? category)}
             >
               <SelectTrigger className="h-10">

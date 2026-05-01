@@ -27,6 +27,10 @@ export type AnalyticsCashflow = {
   // Pre-resolved category (from sync-time BCE/regex pipeline or user
   // override). When present we trust it and skip the runtime classifier.
   category?: TransactionCategory | null;
+  // Set when this row is an internal transfer toward another household
+  // account (eg. moving cash to your savings). The analytics excludes
+  // these from totals.
+  transferToAccountId?: string | null;
 };
 
 function categoryOf(r: AnalyticsCashflow): TransactionCategory {
@@ -62,7 +66,21 @@ export type AnalyticsKpis = {
   largestExpense: number;
   earliestDate: Date | null;
   latestDate: Date | null;
+  // Internal transfers between household accounts — excluded from the
+  // numbers above (they're not real income/expense, just re-allocation).
+  internalTransfersIn: number;
+  internalTransfersOut: number;
+  internalTransfersCount: number;
 };
+
+// Helper: a row is an internal transfer when it has the dedicated
+// `transfer_internal` category OR an explicit transferToAccountId link.
+function isInternalTransfer(r: AnalyticsCashflow): boolean {
+  return (
+    r.category === "transfer_internal" ||
+    !!(r as { transferToAccountId?: string | null }).transferToAccountId
+  );
+}
 
 export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
   if (rows.length === 0) {
@@ -79,6 +97,9 @@ export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
       largestExpense: 0,
       earliestDate: null,
       latestDate: null,
+      internalTransfersIn: 0,
+      internalTransfersOut: 0,
+      internalTransfersCount: 0,
     };
   }
   let totalIn = 0;
@@ -87,7 +108,19 @@ export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
   let largestExpense = 0;
   let earliest = Infinity;
   let latest = -Infinity;
+  let internalTransfersIn = 0;
+  let internalTransfersOut = 0;
+  let internalTransfersCount = 0;
   for (const r of rows) {
+    const t = toDate(r.date).getTime();
+    if (t < earliest) earliest = t;
+    if (t > latest) latest = t;
+    if (isInternalTransfer(r)) {
+      if (r.amount >= 0) internalTransfersIn += r.amount;
+      else internalTransfersOut += -r.amount;
+      internalTransfersCount++;
+      continue;
+    }
     if (r.amount >= 0) {
       totalIn += r.amount;
       if (r.amount > largestIncome) largestIncome = r.amount;
@@ -95,9 +128,6 @@ export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
       totalOut += -r.amount;
       if (-r.amount > largestExpense) largestExpense = -r.amount;
     }
-    const t = toDate(r.date).getTime();
-    if (t < earliest) earliest = t;
-    if (t > latest) latest = t;
   }
   const days = Math.max(1, (latest - earliest) / (1000 * 3600 * 24));
   const months = Math.max(1, days / 30.4375);
@@ -114,6 +144,9 @@ export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
     largestExpense,
     earliestDate: new Date(earliest),
     latestDate: new Date(latest),
+    internalTransfersIn,
+    internalTransfersOut,
+    internalTransfersCount,
   };
 }
 
@@ -134,6 +167,7 @@ export function spendingByCategory(rows: AnalyticsCashflow[]): {
   const buckets: Record<TransactionCategory, { total: number; count: number }> = Object
     .fromEntries(transactionCategory.map((c) => [c, { total: 0, count: 0 }])) as never;
   for (const r of rows) {
+    if (isInternalTransfer(r)) continue; // not real spending — show separately
     const cat = categoryOf(r);
     buckets[cat].total += r.amount;
     buckets[cat].count++;
@@ -164,6 +198,7 @@ export type MonthlyCategoryRow = {
 export function monthlyByCategory(rows: AnalyticsCashflow[]): MonthlyCategoryRow[] {
   const map = new Map<string, MonthlyCategoryRow>();
   for (const r of rows) {
+    if (isInternalTransfer(r)) continue; // exclude internal transfers
     const m = ym(r.date);
     if (!map.has(m)) map.set(m, { month: m, total: 0 });
     const row = map.get(m)!;

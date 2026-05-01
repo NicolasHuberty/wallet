@@ -530,6 +530,11 @@ export const accountCashflow = pgTable(
     // user overrides the category manually).
     categorySource: text("category_source"), // 'user' | 'bce' | 'regex' | 'fallback'
     bceEnterpriseNumber: text("bce_enterprise_number"),
+    // Set when this cashflow is an internal transfer to/from another
+    // account in the same household. Excluded from "real" income/expense
+    // analytics (it's just moving money around). FK with SET NULL so
+    // deleting the target account leaves the cashflow but unlinks it.
+    transferToAccountId: text("transfer_to_account_id"),
     ...timestamps,
   },
   (t) => [
@@ -537,6 +542,7 @@ export const accountCashflow = pgTable(
     index("account_cashflow_account_id_source_idx").on(t.accountId, t.source),
     index("account_cashflow_external_id_idx").on(t.externalId),
     index("account_cashflow_category_idx").on(t.category),
+    index("account_cashflow_transfer_to_idx").on(t.transferToAccountId),
   ],
 );
 
@@ -575,6 +581,10 @@ export const categoryRule = pgTable(
     // How many cashflows the rule has matched so far (incremented at apply
     // time). Used to surface "your most-used rules" in the rules manager.
     hitCount: integer("hit_count").notNull().default(0),
+    // Set when the rule classifies its matches as an internal transfer to
+    // another account in the household. Saves the user from re-picking the
+    // target every time. NULL → standard category-only rule.
+    transferToAccountId: text("transfer_to_account_id"),
     notes: text("notes"),
     ...timestamps,
   },

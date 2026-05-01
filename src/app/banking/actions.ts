@@ -378,6 +378,7 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
           iban: null, // not surfaced today; rule.iban_exact rarely used
           kind: p.kind,
         })),
+        acc.id, // source = the linked account being synced
       );
 
       for (let i = 0; i < prepared.length; i++) {
@@ -409,7 +410,8 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
                   : {
                       category: r.category,
                       categorySource: r.source,
-                      bceEnterpriseNumber: r.bceEnterpriseNumber,
+                      bceEnterpriseNumber: r.bceEnterpriseNumber ?? null,
+                      transferToAccountId: r.transferToAccountId ?? null,
                     }),
                 updatedAt: now,
               })
@@ -428,7 +430,8 @@ export async function syncBankConnection(values: z.infer<typeof syncSchema>) {
           externalId: p.ext,
           category: r.category,
           categorySource: r.source,
-          bceEnterpriseNumber: r.bceEnterpriseNumber,
+          bceEnterpriseNumber: r.bceEnterpriseNumber ?? null,
+          transferToAccountId: r.transferToAccountId ?? null,
           updatedAt: now,
         });
         transactionsAdded++;
@@ -539,6 +542,7 @@ export async function recategorizeAccount(
       iban: null,
       kind: r.kind as CashflowKind,
     })),
+    p.accountId,
   );
 
   let bceMatches = 0;
@@ -555,6 +559,7 @@ export async function recategorizeAccount(
         category: cat.category,
         categorySource: cat.source,
         bceEnterpriseNumber: cat.bceEnterpriseNumber ?? null,
+        transferToAccountId: cat.transferToAccountId ?? null,
         updatedAt: now,
       })
       .where(eq(schema.accountCashflow.id, r.id));
@@ -612,6 +617,9 @@ const setCategoryRuleSchema = z.object({
   applyTo: z.enum(["this_only", "similar_counterparty", "similar_description"]),
   createRule: z.boolean().default(true),
   customPattern: z.string().optional().nullable(),
+  // When set, mark the cashflow (and any matching ones) as a transfer to
+  // this household account. Useful for "money to my savings account" rows.
+  transferToAccountId: z.string().optional().nullable(),
 });
 
 export async function setCashflowCategoryWithRule(
@@ -635,12 +643,25 @@ export async function setCashflowCategoryWithRule(
     .where(eq(schema.accountCashflow.id, p.cashflowId));
   if (!row || row.householdId !== h.id) throw new Error("Mouvement introuvable");
 
+  // Validate transferToAccountId if provided
+  if (p.transferToAccountId) {
+    const [targetAcc] = await db
+      .select({ id: schema.account.id, householdId: schema.account.householdId })
+      .from(schema.account)
+      .where(eq(schema.account.id, p.transferToAccountId));
+    if (!targetAcc || targetAcc.householdId !== h.id)
+      throw new Error("Compte cible introuvable");
+    if (p.transferToAccountId === row.accountId)
+      throw new Error("Impossible de lier un compte à lui-même");
+  }
+
   // Always set the immediate row first (categorySource='user')
   await db
     .update(schema.accountCashflow)
     .set({
       category: p.category,
       categorySource: "user",
+      transferToAccountId: p.transferToAccountId ?? null,
       updatedAt: new Date(),
     })
     .where(eq(schema.accountCashflow.id, p.cashflowId));
@@ -680,7 +701,11 @@ export async function setCashflowCategoryWithRule(
         if (existing[0]) {
           await db
             .update(schema.categoryRule)
-            .set({ category: p.category, updatedAt: new Date() })
+            .set({
+              category: p.category,
+              transferToAccountId: p.transferToAccountId ?? null,
+              updatedAt: new Date(),
+            })
             .where(eq(schema.categoryRule.id, existing[0].id));
           ruleId = existing[0].id;
         } else {
@@ -692,6 +717,7 @@ export async function setCashflowCategoryWithRule(
               pattern,
               category: p.category,
               priority: matcherType === "counterparty_exact" ? 10 : 50,
+              transferToAccountId: p.transferToAccountId ?? null,
               updatedAt: new Date(),
             })
             .returning();
@@ -704,6 +730,7 @@ export async function setCashflowCategoryWithRule(
         h.id,
         { type: matcherType, pattern },
         p.category,
+        p.transferToAccountId ?? null,
       );
       bulkUpdated = r.updated;
     }

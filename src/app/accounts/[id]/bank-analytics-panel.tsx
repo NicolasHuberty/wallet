@@ -57,6 +57,7 @@ type Cashflow = {
   kind: AnalyticsCashflow["kind"];
   category: AnalyticsCashflow["category"];
   categorySource: string | null;
+  transferToAccountId?: string | null;
 };
 
 const fmtMonth = (yyyymm: string) => {
@@ -84,6 +85,7 @@ export function BankAnalyticsPanel({
         notes: r.notes,
         kind: r.kind,
         category: r.category ?? null,
+        transferToAccountId: r.transferToAccountId ?? null,
       })),
     [rows],
   );
@@ -149,6 +151,23 @@ export function BankAnalyticsPanel({
           {pending ? "Reclassification…" : "Recatégoriser"}
         </Button>
       </div>
+
+      {/* ─── Internal transfers note ─── */}
+      {kpis.internalTransfersCount > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--chart-2)]/30 bg-[var(--chart-2)]/5 px-4 py-2 text-xs">
+          <ArrowDownCircle className="size-4 rotate-180 text-[var(--chart-2)]" />
+          <div className="flex-1">
+            <strong className="text-foreground">
+              {kpis.internalTransfersCount} virement(s) interne(s)
+            </strong>{" "}
+            <span className="text-muted-foreground">
+              entre tes propres comptes ·{" "}
+              {formatEUR(kpis.internalTransfersOut)} sortis ·{" "}
+              {formatEUR(kpis.internalTransfersIn)} reçus · exclus des dépenses analytiques
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ─── Hero KPIs ─── */}
       <section className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">

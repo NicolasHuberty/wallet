@@ -19,7 +19,7 @@ import {
   transactionCategory,
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
-import { TransactionEditDialog } from "./transaction-edit-dialog";
+import { TransactionEditDialog, type HouseholdAccountOption } from "./transaction-edit-dialog";
 import { toDate } from "@/lib/utils";
 
 type Cashflow = {
@@ -32,12 +32,19 @@ type Cashflow = {
   category: string | null;
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
+  transferToAccountId: string | null;
   source: string;
 };
 
 type SourceFilter = "all" | "user" | "user_rule" | "bce" | "regex" | "fallback" | "unclassified";
 
-export function TransactionTable({ rows }: { rows: Cashflow[] }) {
+export function TransactionTable({
+  rows,
+  householdAccounts = [],
+}: {
+  rows: Cashflow[];
+  householdAccounts?: HouseholdAccountOption[];
+}) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<TransactionCategory | "all" | "uncategorized">("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -293,6 +300,7 @@ export function TransactionTable({ rows }: { rows: Cashflow[] }) {
         open={!!editing}
         onOpenChange={(o) => !o && setEditing(null)}
         cashflow={editing}
+        householdAccounts={householdAccounts}
       />
     </section>
   );

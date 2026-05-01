@@ -43,6 +43,13 @@
       "when": 1777653312882,
       "tag": "0005_outgoing_dormammu",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777654452051,
+      "tag": "0006_simple_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

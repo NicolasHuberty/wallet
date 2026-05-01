@@ -36,12 +36,54 @@ export type CategorizationInput = {
 
 export type CategorizationOutcome = {
   category: TransactionCategory;
-  source: "user_rule" | "bce" | "regex" | "fallback";
+  source: "user_rule" | "bce" | "regex" | "fallback" | "internal_transfer";
   confidence: number; // 0..1, higher = more certain
   ruleId?: string;
   bceEnterpriseNumber?: string;
   bceMatchType?: "exact" | "prefix" | "substring";
+  // Set when the cashflow is recognised as an internal transfer to another
+  // household account.
+  transferToAccountId?: string;
 };
+
+// Lightweight account info we need for the internal-transfer detector.
+export type HouseholdAccount = { id: string; name: string };
+
+// Heuristic: spot transactions that look like the user is moving money
+// between two of their own accounts (eg. "Compte d'épargne — To Compte
+// d'épargne", "Vers Épargne", "Transfer to Trade Republic"). If we have a
+// household account whose name normalises to a substring of the
+// transaction's notes, return that account's id.
+export function detectInternalTransfer(
+  notes: string | null,
+  accounts: HouseholdAccount[],
+  excludeAccountId?: string,
+): HouseholdAccount | null {
+  if (!notes || accounts.length === 0) return null;
+  const norm = normalizeBceName(notes);
+  if (!norm) return null;
+  // Generic transfer hints — must be combined with an account-name match
+  // to avoid false positives.
+  const hasTransferHint =
+    /(compte d epargne|d epargne|savings|spaarrek|virement|to compte|from compte|transfer to|transfer from|vers compte|depuis compte)/i.test(
+      notes,
+    );
+  // First pass: exact account-name token match
+  for (const acc of accounts) {
+    if (excludeAccountId && acc.id === excludeAccountId) continue;
+    const accNorm = normalizeBceName(acc.name);
+    if (!accNorm || accNorm.length < 3) continue;
+    if (norm.includes(accNorm)) return acc;
+  }
+  // Second pass: rely on the transfer-hint regex when there's only one
+  // candidate account besides the source. Useful for "Compte d'épargne"
+  // when the user named their savings account something else.
+  if (hasTransferHint) {
+    const candidates = accounts.filter((a) => a.id !== excludeAccountId);
+    if (candidates.length === 1) return candidates[0];
+  }
+  return null;
+}
 
 // ─── User rule lookup ────────────────────────────────────────────────
 
@@ -225,6 +267,10 @@ export async function lookupBceForRow(
 export async function resolveCategorySingle(
   householdId: string,
   input: CategorizationInput,
+  // Caller can pass the household's accounts upfront. When omitted we
+  // fetch them so the internal-transfer detector still works.
+  householdAccounts?: HouseholdAccount[],
+  sourceAccountId?: string,
 ): Promise<CategorizationOutcome> {
   // 1. User rules
   const rules = await db
@@ -243,6 +289,28 @@ export async function resolveCategorySingle(
       source: "user_rule",
       confidence: 1,
       ruleId: ruleHit.rule.id,
+      transferToAccountId: ruleHit.rule.transferToAccountId ?? undefined,
+    };
+  }
+
+  // 1b. Internal-transfer auto-detect
+  const accounts =
+    householdAccounts ??
+    (await db
+      .select({ id: schema.account.id, name: schema.account.name })
+      .from(schema.account)
+      .where(eq(schema.account.householdId, householdId)));
+  const internalHit = detectInternalTransfer(
+    input.notes,
+    accounts,
+    sourceAccountId,
+  );
+  if (internalHit) {
+    return {
+      category: "transfer_internal",
+      source: "internal_transfer",
+      confidence: 0.9,
+      transferToAccountId: internalHit.id,
     };
   }
 
@@ -284,6 +352,7 @@ export async function resolveCategorySingle(
 export async function resolveCategoriesBatchV2(
   householdId: string,
   inputs: CategorizationInput[],
+  sourceAccountId?: string,
 ): Promise<CategorizationOutcome[]> {
   if (inputs.length === 0) return [];
 
@@ -292,6 +361,12 @@ export async function resolveCategoriesBatchV2(
     .select()
     .from(schema.categoryRule)
     .where(eq(schema.categoryRule.householdId, householdId));
+
+  // 1b. Pre-fetch household accounts (for internal-transfer detection)
+  const householdAccounts = await db
+    .select({ id: schema.account.id, name: schema.account.name })
+    .from(schema.account)
+    .where(eq(schema.account.householdId, householdId));
 
   // 2. Pre-fetch BCE exact matches in batch
   const normByIndex = inputs.map((i) =>
@@ -319,6 +394,23 @@ export async function resolveCategoriesBatchV2(
         source: "user_rule",
         confidence: 1,
         ruleId: r.rule.id,
+        transferToAccountId: r.rule.transferToAccountId ?? undefined,
+      });
+      continue;
+    }
+
+    // Layer 1b: internal-transfer auto-detect (between household accounts)
+    const internalHit = detectInternalTransfer(
+      inp.notes,
+      householdAccounts,
+      sourceAccountId,
+    );
+    if (internalHit) {
+      out.push({
+        category: "transfer_internal",
+        source: "internal_transfer",
+        confidence: 0.9,
+        transferToAccountId: internalHit.id,
       });
       continue;
     }
@@ -396,6 +488,7 @@ export async function applyCategoryToSimilarCashflows(
   householdId: string,
   patternMatcher: { type: CategoryRuleMatcherType; pattern: string },
   category: TransactionCategory,
+  transferToAccountId: string | null = null,
 ): Promise<{ updated: number }> {
   // Fetch all cashflows for the household. We filter in-memory because
   // counterparty lives inside `notes` (no separate column yet).
@@ -434,7 +527,12 @@ export async function applyCategoryToSimilarCashflows(
     if (match) {
       await db
         .update(schema.accountCashflow)
-        .set({ category, categorySource: "user", updatedAt: now })
+        .set({
+          category,
+          categorySource: "user",
+          transferToAccountId,
+          updatedAt: now,
+        })
         .where(eq(schema.accountCashflow.id, cf.id));
       updated++;
     }
