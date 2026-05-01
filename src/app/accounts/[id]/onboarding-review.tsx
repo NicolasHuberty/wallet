@@ -21,7 +21,12 @@ import {
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
 import { setCashflowCategoryWithRule } from "@/app/banking/actions";
-import { TransactionEditDialog, type HouseholdAccountOption } from "./transaction-edit-dialog";
+import {
+  TransactionEditDialog,
+  type HouseholdAccountOption,
+  type OneOffChargeOption,
+  type RecurringIncomeOption,
+} from "./transaction-edit-dialog";
 
 type Cashflow = {
   id: string;
@@ -32,6 +37,8 @@ type Cashflow = {
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
   transferToAccountId?: string | null;
+  linkedOneOffChargeId?: string | null;
+  linkedRecurringIncomeId?: string | null;
 };
 
 // Quick-pick categories — the most common ones for personal banking.
@@ -64,9 +71,13 @@ const QUICK_INCOME: TransactionCategory[] = [
 export function OnboardingReviewBanner({
   rows,
   householdAccounts = [],
+  householdCharges = [],
+  householdIncomes = [],
 }: {
   rows: Cashflow[];
   householdAccounts?: HouseholdAccountOption[];
+  householdCharges?: OneOffChargeOption[];
+  householdIncomes?: RecurringIncomeOption[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -128,6 +139,8 @@ export function OnboardingReviewBanner({
         onOpenChange={setOpen}
         rows={toReview}
         householdAccounts={householdAccounts}
+        householdCharges={householdCharges}
+        householdIncomes={householdIncomes}
       />
     </>
   );
@@ -138,11 +151,15 @@ function ReviewWizard({
   onOpenChange,
   rows,
   householdAccounts,
+  householdCharges,
+  householdIncomes,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   rows: Cashflow[];
   householdAccounts: HouseholdAccountOption[];
+  householdCharges: OneOffChargeOption[];
+  householdIncomes: RecurringIncomeOption[];
 }) {
   const router = useRouter();
   const [idx, setIdx] = useState(0);
@@ -203,6 +220,29 @@ function ReviewWizard({
     });
   }
 
+  function pickSalary(incomeId: string, incomeLabel: string) {
+    if (!current) return;
+    start(async () => {
+      try {
+        const r = await setCashflowCategoryWithRule({
+          cashflowId: current.id,
+          category: "income_salary",
+          applyTo: "similar_counterparty",
+          createRule: true,
+          linkedRecurringIncomeId: incomeId,
+        });
+        if (r.bulkUpdated > 1)
+          toast.success(
+            `${r.bulkUpdated} salaires liés à "${incomeLabel}" — futures auto-classées`,
+          );
+        else toast.success(`Lié à "${incomeLabel}"`);
+        advance();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
   // Heuristic — flag transactions that look like internal transfers so we
   // can offer a one-click "transfer to ..." button alongside the category
   // picks. Same regex used by the auto-detector at sync time.
@@ -214,6 +254,31 @@ function ReviewWizard({
   }
   const showTransferButtons =
     householdAccounts.length > 0 && current && detectLocalTransferHint(current.notes);
+
+  // Salary detection — when current row is positive AND looks like income
+  // (description hint OR amount within ±15 % of a known recurring income),
+  // surface the salary picker BEFORE generic quick-pick categories. Helps
+  // when the household has multiple salaries and we want each pay-day
+  // tagged to the right person.
+  const looksLikeSalary =
+    current &&
+    current.amount > 0 &&
+    (current.amount > 200 || (householdIncomes.length > 0)) &&
+    /(salaire|salary|payroll|wage|uclouvain|treatment officer)/i.test(current.notes ?? "");
+  const matchingIncomes =
+    current && current.amount > 0
+      ? householdIncomes
+          .map((i) => ({
+            ...i,
+            close: Math.abs(i.amount - Math.abs(current.amount)) / Math.abs(current.amount) < 0.15,
+          }))
+          .sort((a, b) => Number(b.close) - Number(a.close))
+      : [];
+  const showSalaryButtons =
+    !!current &&
+    householdIncomes.length > 0 &&
+    current.amount > 0 &&
+    (looksLikeSalary || matchingIncomes.some((m) => m.close));
 
   if (!current) return null;
   const positive = current.amount >= 0;
@@ -268,6 +333,36 @@ function ReviewWizard({
                 </div>
               )}
             </div>
+
+            {/* Salary suggestion (when income matches known recurring) */}
+            {showSalaryButtons && (
+              <div className="rounded-lg border border-[var(--color-success)]/40 bg-[var(--color-success)]/5 p-3">
+                <p className="mb-2 text-xs font-semibold">
+                  💰 Cette transaction ressemble à un salaire — auquel ?
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  {matchingIncomes.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => pickSalary(m.id, m.label)}
+                      disabled={pending}
+                      className="flex items-center justify-between gap-2 rounded-md border border-[var(--color-success)]/40 bg-background p-2.5 text-left text-xs transition-colors hover:border-foreground disabled:opacity-50"
+                    >
+                      <span className="flex items-center gap-2">
+                        {m.close && <span className="text-[10px]">⭐</span>}
+                        <CheckCircle2 className="size-3.5 text-[var(--color-success)]" />
+                        <span className="font-medium">{m.label}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          ~{formatEUR(m.amount)}/mois
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">lier + règle</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Internal-transfer suggestion (when description hints at it) */}
             {showTransferButtons && (
@@ -360,6 +455,8 @@ function ReviewWizard({
         }}
         cashflow={current}
         householdAccounts={householdAccounts}
+        householdCharges={householdCharges}
+        householdIncomes={householdIncomes}
       />
     </>
   );

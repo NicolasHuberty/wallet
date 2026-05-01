@@ -5,7 +5,9 @@ import {
   getAccount,
   getAccountSnapshots,
   getAccountCashflows,
+  getCharges,
   getHoldings,
+  getRecurringIncomes,
 } from "@/lib/queries";
 import { buildPerfReport, type PerfCashflow } from "@/lib/performance";
 import {
@@ -66,6 +68,9 @@ export default async function AccountDetailPage({
         .from(schema.account)
         .where(eq(schema.account.householdId, acc.householdId))).filter((a) => a.id !== acc.id)
     : [];
+  // Charges + salaries to offer as link targets when categorising
+  const householdCharges = isBankSynced ? await getCharges(acc.householdId) : [];
+  const householdIncomes = isBankSynced ? await getRecurringIncomes(acc.householdId) : [];
   const perfSnaps = snaps.map((s) => ({ date: toDate(s.date), value: s.value }));
   const perfCfs = cashflows.map((c) => ({
     date: toDate(c.date),
@@ -254,6 +259,18 @@ export default async function AccountDetailPage({
         {isBankSynced && (
           <OnboardingReviewBanner
             householdAccounts={householdAccounts}
+            householdCharges={householdCharges.map((c) => ({
+              id: c.id,
+              label: c.label,
+              category: c.category,
+              amount: c.amount,
+              date: c.date as unknown as string,
+            }))}
+            householdIncomes={householdIncomes.map((i) => ({
+              id: i.id,
+              label: i.label,
+              amount: i.amount,
+            }))}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -263,6 +280,8 @@ export default async function AccountDetailPage({
               categorySource: c.categorySource,
               bceEnterpriseNumber: c.bceEnterpriseNumber,
               transferToAccountId: c.transferToAccountId,
+              linkedOneOffChargeId: c.linkedOneOffChargeId,
+              linkedRecurringIncomeId: c.linkedRecurringIncomeId,
             }))}
           />
         )}
@@ -270,6 +289,7 @@ export default async function AccountDetailPage({
         {isBankSynced && (
           <BankAnalyticsPanel
             accountId={acc.id}
+            incomes={householdIncomes.map((i) => ({ id: i.id, label: i.label }))}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -279,6 +299,8 @@ export default async function AccountDetailPage({
               kind: c.kind as never,
               category: c.category as never,
               categorySource: c.categorySource,
+              transferToAccountId: c.transferToAccountId,
+              linkedRecurringIncomeId: c.linkedRecurringIncomeId,
             }))}
           />
         )}
@@ -351,6 +373,18 @@ export default async function AccountDetailPage({
         {isBankSynced && (
           <TransactionTable
             householdAccounts={householdAccounts}
+            householdCharges={householdCharges.map((c) => ({
+              id: c.id,
+              label: c.label,
+              category: c.category,
+              amount: c.amount,
+              date: c.date as unknown as string,
+            }))}
+            householdIncomes={householdIncomes.map((i) => ({
+              id: i.id,
+              label: i.label,
+              amount: i.amount,
+            }))}
             rows={cashflows.map((c) => ({
               id: c.id,
               date: c.date as unknown as Date,
@@ -362,6 +396,8 @@ export default async function AccountDetailPage({
               categorySource: c.categorySource,
               bceEnterpriseNumber: c.bceEnterpriseNumber,
               transferToAccountId: c.transferToAccountId,
+              linkedOneOffChargeId: c.linkedOneOffChargeId,
+              linkedRecurringIncomeId: c.linkedRecurringIncomeId,
               source: c.source,
             }))}
           />

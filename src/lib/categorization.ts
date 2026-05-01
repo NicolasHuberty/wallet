@@ -47,7 +47,27 @@ export type CategorizationOutcome = {
 };
 
 // Lightweight account info we need for the internal-transfer detector.
-export type HouseholdAccount = { id: string; name: string };
+export type HouseholdAccount = { id: string; name: string; kind?: string };
+
+// Common broker / fintech keywords. When one of these matches the
+// transaction's description AND the household has an investment account
+// of the corresponding kind, we treat it as an internal transfer.
+const BROKER_KEYWORDS: { keyword: string; preferKinds: string[] }[] = [
+  { keyword: "revolut", preferKinds: ["brokerage", "cash", "crypto"] },
+  { keyword: "trade republic", preferKinds: ["brokerage"] },
+  { keyword: "traderepublic", preferKinds: ["brokerage"] },
+  { keyword: "degiro", preferKinds: ["brokerage"] },
+  { keyword: "saxo", preferKinds: ["brokerage"] },
+  { keyword: "keytrade", preferKinds: ["brokerage"] },
+  { keyword: "bolero", preferKinds: ["brokerage"] },
+  { keyword: "boursorama", preferKinds: ["brokerage"] },
+  { keyword: "n26", preferKinds: ["cash", "savings"] },
+  { keyword: "wise", preferKinds: ["cash"] },
+  { keyword: "easyvest", preferKinds: ["brokerage", "retirement"] },
+  { keyword: "binance", preferKinds: ["crypto"] },
+  { keyword: "coinbase", preferKinds: ["crypto"] },
+  { keyword: "kraken", preferKinds: ["crypto"] },
+];
 
 // Heuristic: spot transactions that look like the user is moving money
 // between two of their own accounts (eg. "Compte d'épargne — To Compte
@@ -56,16 +76,17 @@ export type HouseholdAccount = { id: string; name: string };
 // transaction's notes, return that account's id.
 export function detectInternalTransfer(
   notes: string | null,
-  accounts: HouseholdAccount[],
+  accounts: Array<HouseholdAccount & { kind?: string }>,
   excludeAccountId?: string,
 ): HouseholdAccount | null {
   if (!notes || accounts.length === 0) return null;
   const norm = normalizeBceName(notes);
   if (!norm) return null;
+  const lower = notes.toLowerCase();
   // Generic transfer hints — must be combined with an account-name match
   // to avoid false positives.
   const hasTransferHint =
-    /(compte d epargne|d epargne|savings|spaarrek|virement|to compte|from compte|transfer to|transfer from|vers compte|depuis compte)/i.test(
+    /(compte d epargne|d epargne|savings|spaarrek|virement|to compte|from compte|transfer to|transfer from|vers compte|depuis compte|topup|top up|top-up|deposit|d[eé]p[oô]t)/i.test(
       notes,
     );
   // First pass: exact account-name token match
@@ -75,9 +96,21 @@ export function detectInternalTransfer(
     if (!accNorm || accNorm.length < 3) continue;
     if (norm.includes(accNorm)) return acc;
   }
-  // Second pass: rely on the transfer-hint regex when there's only one
-  // candidate account besides the source. Useful for "Compte d'épargne"
-  // when the user named their savings account something else.
+  // Second pass: broker/fintech keywords matching an account of the right
+  // kind. Helpful when the user named their broker account differently
+  // from the brand (eg. "Wallet PEA" for a Trade Republic account).
+  for (const b of BROKER_KEYWORDS) {
+    if (!lower.includes(b.keyword)) continue;
+    const candidate = accounts.find(
+      (a) =>
+        a.id !== excludeAccountId &&
+        (b.preferKinds.length === 0 ||
+          (a.kind && b.preferKinds.includes(a.kind))),
+    );
+    if (candidate) return candidate;
+  }
+  // Third pass: rely on the transfer-hint regex when there's only one
+  // candidate account besides the source.
   if (hasTransferHint) {
     const candidates = accounts.filter((a) => a.id !== excludeAccountId);
     if (candidates.length === 1) return candidates[0];
@@ -297,7 +330,7 @@ export async function resolveCategorySingle(
   const accounts =
     householdAccounts ??
     (await db
-      .select({ id: schema.account.id, name: schema.account.name })
+      .select({ id: schema.account.id, name: schema.account.name, kind: schema.account.kind })
       .from(schema.account)
       .where(eq(schema.account.householdId, householdId)));
   const internalHit = detectInternalTransfer(
@@ -364,7 +397,7 @@ export async function resolveCategoriesBatchV2(
 
   // 1b. Pre-fetch household accounts (for internal-transfer detection)
   const householdAccounts = await db
-    .select({ id: schema.account.id, name: schema.account.name })
+    .select({ id: schema.account.id, name: schema.account.name, kind: schema.account.kind })
     .from(schema.account)
     .where(eq(schema.account.householdId, householdId));
 

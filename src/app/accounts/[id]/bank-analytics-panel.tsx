@@ -31,6 +31,7 @@ import {
 } from "@/lib/transaction-categorizer";
 import {
   buildKpis,
+  buildSalarySummary,
   detectSubscriptions,
   largestTransactions,
   monthlyByCategory,
@@ -38,6 +39,7 @@ import {
   spendingByCategory,
   topMerchants,
   type AnalyticsCashflow,
+  type SalarySummary,
 } from "@/lib/account-analytics";
 import {
   ArrowDownCircle,
@@ -58,7 +60,10 @@ type Cashflow = {
   category: AnalyticsCashflow["category"];
   categorySource: string | null;
   transferToAccountId?: string | null;
+  linkedRecurringIncomeId?: string | null;
 };
+
+export type IncomeOption = { id: string; label: string };
 
 const fmtMonth = (yyyymm: string) => {
   const [y, m] = yyyymm.split("-");
@@ -71,9 +76,11 @@ const fmtMonth = (yyyymm: string) => {
 export function BankAnalyticsPanel({
   accountId,
   rows,
+  incomes = [],
 }: {
   accountId: string;
   rows: Cashflow[];
+  incomes?: IncomeOption[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -86,9 +93,14 @@ export function BankAnalyticsPanel({
         kind: r.kind,
         category: r.category ?? null,
         transferToAccountId: r.transferToAccountId ?? null,
+        linkedRecurringIncomeId: r.linkedRecurringIncomeId ?? null,
       })),
     [rows],
   );
+  const salary = useMemo(() => buildSalarySummary(analyticsRows, incomes), [
+    analyticsRows,
+    incomes,
+  ]);
   const bceMatchCount = rows.filter((r) => r.categorySource === "bce").length;
   const userOverrideCount = rows.filter((r) => r.categorySource === "user").length;
   const unclassified = rows.filter((r) => !r.category).length;
@@ -271,6 +283,9 @@ export function BankAnalyticsPanel({
         <BiggestTransactions rows={biggest} />
         <SavingsRateChart data={savingsRate} />
       </section>
+
+      {/* ─── Salary evolution ─── */}
+      {salary.count > 0 && <SalaryTrendChart summary={salary} incomes={incomes} />}
     </div>
   );
 }
@@ -686,6 +701,177 @@ function BiggestTransactions({
           );
         })}
       </ul>
+    </section>
+  );
+}
+
+// ─── Salary trend chart ─────────────────────────────────────────────
+
+const SALARY_PALETTE = [
+  "var(--color-success)",
+  "var(--chart-1)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "#ec4899",
+  "#a855f7",
+];
+
+function SalaryTrendChart({
+  summary,
+  incomes,
+}: {
+  summary: SalarySummary;
+  incomes: IncomeOption[];
+}) {
+  const incomeKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of summary.series) for (const k of Object.keys(r)) if (k.startsWith("inc:")) set.add(k);
+    return Array.from(set);
+  }, [summary.series]);
+
+  const labelByKey = (key: string): string => {
+    if (key === "inc:unlinked") return "Salaire non lié";
+    const id = key.slice(4);
+    const found = incomes.find((i) => i.id === id);
+    return found?.label ?? "Salaire inconnu";
+  };
+
+  const fmtMonthLocal = (yyyymm: string) => {
+    const [y, m] = yyyymm.split("-");
+    return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleDateString("fr-BE", {
+      month: "short",
+      year: "2-digit",
+    });
+  };
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 md:p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold sm:text-base">Évolution des salaires reçus</h3>
+          <p className="text-[10px] text-muted-foreground">
+            Reçus uniquement (inclut tout transaction catégorisée Salaire ou liée à un revenu
+            récurrent connu).
+          </p>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="mb-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+        <div className="rounded-md border border-border bg-background p-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Total reçu</div>
+          <div className="numeric text-sm font-semibold tabular-nums">
+            {formatEUR(summary.totalReceived)}
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-background p-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Moyenne / mois</div>
+          <div className="numeric text-sm font-semibold tabular-nums">
+            {formatEUR(summary.averagePerMonth)}
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-background p-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Médiane</div>
+          <div className="numeric text-sm font-semibold tabular-nums">
+            {formatEUR(summary.medianPerMonth)}
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-background p-2">
+          <div className="text-[10px] uppercase text-muted-foreground">Min / Max</div>
+          <div className="numeric text-xs font-semibold tabular-nums">
+            {formatEUR(summary.minMonth)} / {formatEUR(summary.maxMonth)}
+          </div>
+        </div>
+      </div>
+
+      <div className="h-64 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={summary.series}
+            margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+            <XAxis
+              dataKey="month"
+              tickFormatter={fmtMonthLocal}
+              stroke="var(--muted-foreground)"
+              tickLine={false}
+              axisLine={false}
+              fontSize={10}
+            />
+            <YAxis
+              tickFormatter={(v) => formatEUR(Number(v), { compact: true })}
+              stroke="var(--muted-foreground)"
+              tickLine={false}
+              axisLine={false}
+              fontSize={10}
+              width={56}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "var(--popover)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 11,
+              }}
+              labelFormatter={(label) => fmtMonthLocal(String(label))}
+              formatter={(v, n) => [formatEUR(Number(v)), labelByKey(String(n))]}
+            />
+            <ReferenceLine
+              y={summary.averagePerMonth}
+              stroke="var(--color-success)"
+              strokeDasharray="4 4"
+              label={{
+                value: `Moyenne ${formatEUR(summary.averagePerMonth)}`,
+                position: "top",
+                fill: "var(--color-success)",
+                fontSize: 10,
+              }}
+            />
+            {incomeKeys.map((k, i) => (
+              <Bar
+                key={k}
+                dataKey={k}
+                stackId="salary"
+                fill={SALARY_PALETTE[i % SALARY_PALETTE.length]}
+                radius={[1, 1, 0, 0]}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Per-source summary */}
+      {summary.bySource.length > 0 && (
+        <ul className="mt-3 grid gap-1.5 text-xs sm:grid-cols-2">
+          {summary.bySource
+            .sort((a, b) => b.total - a.total)
+            .map((s, i) => {
+              const id = s.id;
+              const label = id === null
+                ? "Salaire non lié"
+                : (incomes.find((x) => x.id === id)?.label ?? "Salaire inconnu");
+              return (
+                <li
+                  key={id ?? "unlinked"}
+                  className="flex items-baseline justify-between gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ background: SALARY_PALETTE[i % SALARY_PALETTE.length] }}
+                    />
+                    <span className="truncate font-medium">{label}</span>
+                  </span>
+                  <span className="numeric tabular-nums text-[10px]">
+                    {formatEUR(s.total)} ·{" "}
+                    <span className="text-muted-foreground">moy {formatEUR(s.average)}</span>
+                  </span>
+                </li>
+              );
+            })}
+        </ul>
+      )}
     </section>
   );
 }

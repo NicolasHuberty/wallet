@@ -620,6 +620,10 @@ const setCategoryRuleSchema = z.object({
   // When set, mark the cashflow (and any matching ones) as a transfer to
   // this household account. Useful for "money to my savings account" rows.
   transferToAccountId: z.string().optional().nullable(),
+  // Optional links to existing one-off charges or recurring income rows
+  // (the user picks them in the UI for richer reconciliation).
+  linkedOneOffChargeId: z.string().optional().nullable(),
+  linkedRecurringIncomeId: z.string().optional().nullable(),
 });
 
 export async function setCashflowCategoryWithRule(
@@ -655,6 +659,26 @@ export async function setCashflowCategoryWithRule(
       throw new Error("Impossible de lier un compte à lui-même");
   }
 
+  // Validate one-off charge if provided
+  if (p.linkedOneOffChargeId) {
+    const [c] = await db
+      .select({ id: schema.oneOffCharge.id, householdId: schema.oneOffCharge.householdId })
+      .from(schema.oneOffCharge)
+      .where(eq(schema.oneOffCharge.id, p.linkedOneOffChargeId));
+    if (!c || c.householdId !== h.id) throw new Error("Frais one-shot introuvable");
+  }
+  // Validate recurring income if provided
+  if (p.linkedRecurringIncomeId) {
+    const [c] = await db
+      .select({
+        id: schema.recurringIncome.id,
+        householdId: schema.recurringIncome.householdId,
+      })
+      .from(schema.recurringIncome)
+      .where(eq(schema.recurringIncome.id, p.linkedRecurringIncomeId));
+    if (!c || c.householdId !== h.id) throw new Error("Salaire introuvable");
+  }
+
   // Always set the immediate row first (categorySource='user')
   await db
     .update(schema.accountCashflow)
@@ -662,6 +686,8 @@ export async function setCashflowCategoryWithRule(
       category: p.category,
       categorySource: "user",
       transferToAccountId: p.transferToAccountId ?? null,
+      linkedOneOffChargeId: p.linkedOneOffChargeId ?? null,
+      linkedRecurringIncomeId: p.linkedRecurringIncomeId ?? null,
       updatedAt: new Date(),
     })
     .where(eq(schema.accountCashflow.id, p.cashflowId));

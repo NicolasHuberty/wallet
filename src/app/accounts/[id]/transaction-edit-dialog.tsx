@@ -45,9 +45,19 @@ type Cashflow = {
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
   transferToAccountId?: string | null;
+  linkedOneOffChargeId?: string | null;
+  linkedRecurringIncomeId?: string | null;
 };
 
 export type HouseholdAccountOption = { id: string; name: string; kind: string };
+export type OneOffChargeOption = {
+  id: string;
+  label: string;
+  category: string;
+  amount: number;
+  date: string;
+};
+export type RecurringIncomeOption = { id: string; label: string; amount: number };
 
 type BceCandidate = {
   enterpriseNumber: string;
@@ -70,11 +80,15 @@ export function TransactionEditDialog({
   onOpenChange,
   cashflow,
   householdAccounts = [],
+  householdCharges = [],
+  householdIncomes = [],
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   cashflow: Cashflow | null;
   householdAccounts?: HouseholdAccountOption[];
+  householdCharges?: OneOffChargeOption[];
+  householdIncomes?: RecurringIncomeOption[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -87,6 +101,12 @@ export function TransactionEditDialog({
   const [transferTo, setTransferTo] = useState<string | null>(
     cashflow?.transferToAccountId ?? null,
   );
+  const [linkedCharge, setLinkedCharge] = useState<string | null>(
+    cashflow?.linkedOneOffChargeId ?? null,
+  );
+  const [linkedIncome, setLinkedIncome] = useState<string | null>(
+    cashflow?.linkedRecurringIncomeId ?? null,
+  );
   const [bceQuery, setBceQuery] = useState("");
   const [bceCandidates, setBceCandidates] = useState<BceCandidate[]>([]);
   const [bceSearching, setBceSearching] = useState(false);
@@ -96,10 +116,18 @@ export function TransactionEditDialog({
     if (cashflow?.category) setCategory(cashflow.category as TransactionCategory);
     setApplyTo("similar_counterparty");
     setTransferTo(cashflow?.transferToAccountId ?? null);
+    setLinkedCharge(cashflow?.linkedOneOffChargeId ?? null);
+    setLinkedIncome(cashflow?.linkedRecurringIncomeId ?? null);
     setBceQuery("");
     setBceCandidates([]);
     setShowBce(false);
-  }, [cashflow?.id, cashflow?.category, cashflow?.transferToAccountId]);
+  }, [
+    cashflow?.id,
+    cashflow?.category,
+    cashflow?.transferToAccountId,
+    cashflow?.linkedOneOffChargeId,
+    cashflow?.linkedRecurringIncomeId,
+  ]);
 
   // Debounced BCE search
   useEffect(() => {
@@ -133,6 +161,8 @@ export function TransactionEditDialog({
           applyTo,
           createRule: applyTo !== "this_only",
           transferToAccountId: transferTo,
+          linkedOneOffChargeId: linkedCharge,
+          linkedRecurringIncomeId: linkedIncome,
         });
         if (r.bulkUpdated > 0)
           toast.success(
@@ -320,6 +350,96 @@ export function TransactionEditDialog({
               ))}
             </div>
           </div>
+
+          {/* Linked one-off charge — only when current row is an expense */}
+          {cashflow.amount < 0 && householdCharges.length > 0 && (
+            <div className="rounded-lg border border-border p-3">
+              <Label className="text-xs font-semibold">Lier à un frais one-shot</Label>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Si cette dépense correspond à un frais que tu as déjà enregistré (notaire,
+                expertise, droits d&apos;enregistrement…), choisis-le pour les rapprocher.
+              </p>
+              <Select
+                value={linkedCharge ?? "none"}
+                onValueChange={(v) => setLinkedCharge(v && v !== "none" ? v : null)}
+              >
+                <SelectTrigger className="mt-2 h-9">
+                  <SelectValue placeholder="Aucun lien" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Aucun frais lié —</SelectItem>
+                  {householdCharges
+                    .map((c) => {
+                      const dateStr = c.date ? new Date(c.date).toLocaleDateString("fr-BE") : "";
+                      const amountClose =
+                        Math.abs(Math.abs(c.amount) - Math.abs(cashflow.amount)) /
+                          Math.abs(cashflow.amount) <
+                        0.05;
+                      return { c, dateStr, amountClose };
+                    })
+                    .sort((a, b) => Number(b.amountClose) - Number(a.amountClose))
+                    .map(({ c, dateStr, amountClose }) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        <span className="flex items-baseline gap-2">
+                          {amountClose && <span className="text-[10px]">⭐</span>}
+                          <span className="font-medium">{c.label}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {formatEUR(c.amount)} · {dateStr}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Linked recurring income — only when current row is income */}
+          {cashflow.amount > 0 && householdIncomes.length > 0 && (
+            <div className="rounded-lg border border-border p-3">
+              <Label className="text-xs font-semibold">
+                Quel salaire / revenu récurrent ?
+                {householdIncomes.length > 1 && (
+                  <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                    (tu en as {householdIncomes.length} en système)
+                  </span>
+                )}
+              </Label>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Lier à un salaire récurrent permet de tracer son évolution dans le temps.
+              </p>
+              <Select
+                value={linkedIncome ?? "none"}
+                onValueChange={(v) => setLinkedIncome(v && v !== "none" ? v : null)}
+              >
+                <SelectTrigger className="mt-2 h-9">
+                  <SelectValue placeholder="Pas un salaire connu" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Pas un salaire connu —</SelectItem>
+                  {householdIncomes
+                    .map((i) => {
+                      const amountClose =
+                        Math.abs(i.amount - Math.abs(cashflow.amount)) / Math.abs(cashflow.amount) <
+                        0.1;
+                      return { i, amountClose };
+                    })
+                    .sort((a, b) => Number(b.amountClose) - Number(a.amountClose))
+                    .map(({ i, amountClose }) => (
+                      <SelectItem key={i.id} value={i.id}>
+                        <span className="flex items-baseline gap-2">
+                          {amountClose && <span className="text-[10px]">⭐</span>}
+                          <span className="font-medium">{i.label}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            ~{formatEUR(i.amount)}/mois
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* BCE link */}
           <div className="rounded-lg border border-border p-3">

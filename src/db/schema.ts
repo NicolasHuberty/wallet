@@ -535,6 +535,13 @@ export const accountCashflow = pgTable(
     // analytics (it's just moving money around). FK with SET NULL so
     // deleting the target account leaves the cashflow but unlinks it.
     transferToAccountId: text("transfer_to_account_id"),
+    // Optional link to a one-shot charge (eg. notary fees, registration
+    // tax, expertise) that the user pre-recorded. Once linked the
+    // cashflow inherits the charge's category and sourcing.
+    linkedOneOffChargeId: text("linked_one_off_charge_id"),
+    // For salary-like income, the specific recurringIncome row this
+    // payment corresponds to (when the household has multiple salaries).
+    linkedRecurringIncomeId: text("linked_recurring_income_id"),
     ...timestamps,
   },
   (t) => [

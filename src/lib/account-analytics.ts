@@ -31,6 +31,9 @@ export type AnalyticsCashflow = {
   // account (eg. moving cash to your savings). The analytics excludes
   // these from totals.
   transferToAccountId?: string | null;
+  // Optional explicit link to a household recurringIncome row (used by
+  // the salary trend chart to break down per source).
+  linkedRecurringIncomeId?: string | null;
 };
 
 function categoryOf(r: AnalyticsCashflow): TransactionCategory {
@@ -354,6 +357,94 @@ export function monthlySavingsRate(rows: AnalyticsCashflow[]): SavingsRatePoint[
       ratePct: v.income > 0 ? ((v.income - v.expenses) / v.income) * 100 : null,
     }))
     .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+// ─── Salary trend (monthly + per source) ────────────────────────────
+// Aggregates positive cashflows that are categorised as salary (or
+// linked to a known recurringIncome) by month and by source. Used by
+// the bank-analytics-panel to draw a salary evolution chart.
+
+export type SalaryMonthRow = {
+  month: string; // YYYY-MM
+  total: number;
+} & Record<string, number | string>; // dynamic per-income columns ("inc:<id>")
+
+export type SalarySummary = {
+  series: SalaryMonthRow[];
+  totalReceived: number;
+  count: number;
+  averagePerMonth: number;
+  medianPerMonth: number;
+  minMonth: number;
+  maxMonth: number;
+  // Per-source totals — useful for legend / KPIs
+  bySource: Array<{ id: string | null; total: number; count: number; average: number }>;
+};
+
+export function buildSalarySummary(
+  rows: AnalyticsCashflow[],
+  knownIncomes: Array<{ id: string; label: string }>,
+): SalarySummary {
+  const monthMap = new Map<string, SalaryMonthRow>();
+  const sourceTotals = new Map<string | null, { total: number; count: number; months: Set<string> }>();
+  for (const r of rows) {
+    if (r.amount <= 0) continue;
+    const isSalary =
+      r.category === "income_salary" || r.linkedRecurringIncomeId != null;
+    if (!isSalary) continue;
+    const m = ym(r.date);
+    if (!monthMap.has(m)) monthMap.set(m, { month: m, total: 0 });
+    const row = monthMap.get(m)!;
+    const incomeId = r.linkedRecurringIncomeId ?? null;
+    const colKey = incomeId ? `inc:${incomeId}` : "inc:unlinked";
+    row[colKey] = ((row[colKey] as number) ?? 0) + r.amount;
+    row.total += r.amount;
+    if (!sourceTotals.has(incomeId))
+      sourceTotals.set(incomeId, { total: 0, count: 0, months: new Set() });
+    const s = sourceTotals.get(incomeId)!;
+    s.total += r.amount;
+    s.count++;
+    s.months.add(m);
+  }
+
+  const series = Array.from(monthMap.values()).sort((a, b) =>
+    String(a.month).localeCompare(String(b.month)),
+  );
+  const totals = series.map((m) => m.total).filter((n) => n > 0);
+  const totalReceived = totals.reduce((s, x) => s + x, 0);
+  const count = series.reduce(
+    (s, m) =>
+      s +
+      (knownIncomes.length === 0
+        ? 1
+        : Object.keys(m).filter((k) => k.startsWith("inc:")).length),
+    0,
+  );
+  const averagePerMonth = totals.length > 0 ? totalReceived / totals.length : 0;
+  const sorted = [...totals].sort((a, b) => a - b);
+  const medianPerMonth =
+    sorted.length === 0
+      ? 0
+      : sorted[Math.floor(sorted.length / 2)];
+  const minMonth = sorted[0] ?? 0;
+  const maxMonth = sorted[sorted.length - 1] ?? 0;
+  const bySource = Array.from(sourceTotals.entries()).map(([id, s]) => ({
+    id,
+    total: s.total,
+    count: s.count,
+    average: s.months.size > 0 ? s.total / s.months.size : 0,
+  }));
+  void knownIncomes;
+  return {
+    series,
+    totalReceived,
+    count,
+    averagePerMonth,
+    medianPerMonth,
+    minMonth,
+    maxMonth,
+    bySource,
+  };
 }
 
 // ─── Daily spend heatmap (calendar) ─────────────────────────────────

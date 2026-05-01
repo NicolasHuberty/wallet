@@ -19,7 +19,12 @@ import {
   transactionCategory,
   type TransactionCategory,
 } from "@/lib/transaction-categorizer";
-import { TransactionEditDialog, type HouseholdAccountOption } from "./transaction-edit-dialog";
+import {
+  TransactionEditDialog,
+  type HouseholdAccountOption,
+  type OneOffChargeOption,
+  type RecurringIncomeOption,
+} from "./transaction-edit-dialog";
 import { toDate } from "@/lib/utils";
 
 type Cashflow = {
@@ -33,6 +38,8 @@ type Cashflow = {
   categorySource: string | null;
   bceEnterpriseNumber: string | null;
   transferToAccountId: string | null;
+  linkedOneOffChargeId?: string | null;
+  linkedRecurringIncomeId?: string | null;
   source: string;
 };
 
@@ -41,9 +48,13 @@ type SourceFilter = "all" | "user" | "user_rule" | "bce" | "regex" | "fallback" 
 export function TransactionTable({
   rows,
   householdAccounts = [],
+  householdCharges = [],
+  householdIncomes = [],
 }: {
   rows: Cashflow[];
   householdAccounts?: HouseholdAccountOption[];
+  householdCharges?: OneOffChargeOption[];
+  householdIncomes?: RecurringIncomeOption[];
 }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<TransactionCategory | "all" | "uncategorized">("all");
@@ -301,6 +312,8 @@ export function TransactionTable({
         onOpenChange={(o) => !o && setEditing(null)}
         cashflow={editing}
         householdAccounts={householdAccounts}
+        householdCharges={householdCharges}
+        householdIncomes={householdIncomes}
       />
     </section>
   );
