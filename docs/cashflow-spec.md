@@ -756,5 +756,4 @@ Tous suffixés `.test.ts` (vitest, cohérent avec le repo).
   l'investissement.
 - **Capacité d'Épargne Réelle** : `revenus − fixes − variables − coussin`,
   affichée à la fin de l'onboarding.
-</content>
 </invoke>

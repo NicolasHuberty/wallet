@@ -270,6 +270,24 @@ export const expenseCategory = [
   "other",
 ] as const;
 
+// Cash-flow ("Cap") — recurrence cadence for a dated flow. Extends dcaFrequency
+// with a yearly option (some insurances are billed once a year).
+export const flowFrequency = [
+  "weekly",
+  "biweekly",
+  "monthly",
+  "quarterly",
+  "yearly",
+] as const;
+export type FlowFrequency = (typeof flowFrequency)[number];
+
+// Cash-flow — nature of a recurring expense. "fixed" = deterministic dated
+// commitment (rent, subscription) auto-deducted without user input; "variable"
+// = drives a budget envelope confirmed by the user (kept here for completeness
+// though most variable spend lives in the budgetEnvelope table).
+export const flowType = ["fixed", "variable"] as const;
+export type FlowType = (typeof flowType)[number];
+
 export const recurringExpense = pgTable(
   "recurring_expense",
   {
@@ -288,6 +306,16 @@ export const recurringExpense = pgTable(
     startDate: timestamp("start_date", { withTimezone: true }).notNull(),
     endDate: timestamp("end_date", { withTimezone: true }),
     notes: text("notes"),
+    // ── Cash-flow ("Cap") fields ──────────────────────────────────────
+    // Day of month (1..31) the flow occurs on. Clamped to the last day of
+    // short months at expansion time. NULL = legacy/undated expense.
+    dayOfMonth: integer("day_of_month"),
+    frequency: text("frequency", { enum: flowFrequency }).notNull().default("monthly"),
+    flowType: text("flow_type", { enum: flowType }).notNull().default("fixed"),
+    // Paused without deletion (e.g. cancelled subscription, holiday month).
+    active: boolean("active").notNull().default(true),
+    // Fixed dated flows are deducted from Safe-to-Spend without a confirmation tap.
+    autoConfirm: boolean("auto_confirm").notNull().default(true),
     ...timestamps,
   },
   (t) => [index("recurring_expense_household_id_idx").on(t.householdId)],
@@ -331,6 +359,13 @@ export const recurringIncome = pgTable(
     startDate: timestamp("start_date", { withTimezone: true }).notNull(),
     endDate: timestamp("end_date", { withTimezone: true }),
     notes: text("notes"),
+    // ── Cash-flow ("Cap") fields ──────────────────────────────────────
+    // Day of month the income is paid (e.g. 28). NULL = undated/legacy.
+    dayOfMonth: integer("day_of_month"),
+    // Variable income (freelance, bonuses): Safe-to-Spend runs on floorAmount,
+    // the surplus overflows to savings when actually received.
+    isVariable: boolean("is_variable").notNull().default(false),
+    floorAmount: real("floor_amount"),
     ...timestamps,
   },
   (t) => [index("recurring_income_household_id_idx").on(t.householdId)],
@@ -701,12 +736,193 @@ export const projectionScenario = pgTable(
   (t) => [index("projection_scenario_household_id_idx").on(t.householdId)],
 );
 
-export const householdRelations = relations(household, ({ many }) => ({
+// ────────────────────────────────────────────────────────────────────
+// Cash-flow ("Cap") — predictive Safe-to-Spend engine
+// ────────────────────────────────────────────────────────────────────
+
+// One row per household. Output of the onboarding "concierge" + global
+// cash-flow settings.
+export const profileComposition = ["single", "couple"] as const;
+export const savingsTargetMode = ["fixed", "max"] as const;
+
+export const financialProfile = pgTable(
+  "financial_profile",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    composition: text("composition", { enum: profileComposition })
+      .notNull()
+      .default("single"),
+    childrenCount: integer("children_count").notNull().default(0),
+    carsCount: integer("cars_count").notNull().default(0),
+    city: text("city"),
+    // Savings objective.
+    savingsTargetMode: text("savings_target_mode", { enum: savingsTargetMode })
+      .notNull()
+      .default("max"),
+    savingsTargetAmount: real("savings_target_amount"),
+    // Monthly buffer reserved for the unexpected.
+    bufferAmount: real("buffer_amount").notNull().default(0),
+    // Default destination for end-of-period overflow.
+    defaultRolloverPolicy: text("default_rollover_policy", { enum: ["to_savings", "accumulate", "reset"] })
+      .notNull()
+      .default("to_savings"),
+    // Which account holds the "everyday spending" balance the engine reads.
+    spendingAccountId: text("spending_account_id").references(() => account.id, {
+      onDelete: "set null",
+    }),
+    onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index("financial_profile_household_id_idx").on(t.householdId)],
+);
+
+export const envelopeCadence = ["weekly", "biweekly", "monthly", "per_occurrence"] as const;
+export type EnvelopeCadence = (typeof envelopeCadence)[number];
+
+export const rolloverPolicy = ["to_savings", "accumulate", "reset"] as const;
+export type RolloverPolicy = (typeof rolloverPolicy)[number];
+
+// A variable, frequency-based spending category (groceries, bar, fuel…).
+export const budgetEnvelope = pgTable(
+  "budget_envelope",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    // Free-text category: presets (expenseCategory) or user-defined string.
+    category: text("category").notNull(),
+    // Monthly envelope amount (computed from unit cost × cadence at setup).
+    monthlyAmount: real("monthly_amount").notNull(),
+    cadence: text("cadence", { enum: envelopeCadence }).notNull().default("monthly"),
+    // Expected occurrences per month (e.g. 3 bar nights; ~4.33 if weekly).
+    occurrencesPerMonth: real("occurrences_per_month"),
+    rolloverPolicy: text("rollover_policy", { enum: rolloverPolicy })
+      .notNull()
+      .default("to_savings"),
+    active: boolean("active").notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [index("budget_envelope_household_id_idx").on(t.householdId)],
+);
+
+export const cycleStatus = ["open", "closed"] as const;
+export type CycleStatus = (typeof cycleStatus)[number];
+
+// The frozen state of one month: the plan at opening, the result at closing.
+export const monthCycle = pgTable(
+  "month_cycle",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    month: text("month").notNull(), // YYYY-MM
+    status: text("status", { enum: cycleStatus }).notNull().default("open"),
+    // Plan frozen at opening (to compare plan vs actual at close).
+    plannedIncome: real("planned_income").notNull().default(0),
+    plannedFixed: real("planned_fixed").notNull().default(0),
+    plannedVariable: real("planned_variable").notNull().default(0),
+    savingsTarget: real("savings_target").notNull().default(0),
+    bufferAmount: real("buffer_amount").notNull().default(0),
+    openingBalance: real("opening_balance").notNull().default(0),
+    // Result frozen at closing.
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    actualSaved: real("actual_saved"),
+    varianceVsPlan: real("variance_vs_plan"),
+    ...timestamps,
+  },
+  (t) => [index("month_cycle_household_id_month_idx").on(t.householdId, t.month)],
+);
+
+export const spendSource = ["manual", "auto_cadence", "bank_sync", "rollover"] as const;
+export type SpendSource = (typeof spendSource)[number];
+
+// A confirmed variable spend (the 1-click confirmation) or unexpected charge.
+export const spendEvent = pgTable(
+  "spend_event",
+  {
+    id: id(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => household.id, { onDelete: "cascade" }),
+    cycleId: text("cycle_id").references(() => monthCycle.id, { onDelete: "set null" }),
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    amount: real("amount").notNull(), // positive = spend
+    envelopeId: text("envelope_id").references(() => budgetEnvelope.id, {
+      onDelete: "set null",
+    }),
+    // When true the spend is charged to the buffer rather than an envelope.
+    chargedToBuffer: boolean("charged_to_buffer").notNull().default(false),
+    label: text("label"),
+    source: text("source", { enum: spendSource }).notNull().default("manual"),
+    // Optional link to a real bank cashflow (bank-sync mode) for reconciliation.
+    linkedCashflowId: text("linked_cashflow_id"),
+    notes: text("notes"),
+    ...timestamps,
+  },
+  (t) => [
+    index("spend_event_household_cycle_idx").on(t.householdId, t.cycleId),
+    index("spend_event_envelope_idx").on(t.envelopeId),
+    index("spend_event_date_idx").on(t.date),
+  ],
+);
+
+export const householdRelations = relations(household, ({ one, many }) => ({
   members: many(member),
   accounts: many(account),
   recurringExpenses: many(recurringExpense),
   recurringIncomes: many(recurringIncome),
   projections: many(projectionScenario),
+  financialProfile: one(financialProfile, {
+    fields: [household.id],
+    references: [financialProfile.householdId],
+  }),
+  budgetEnvelopes: many(budgetEnvelope),
+  monthCycles: many(monthCycle),
+  spendEvents: many(spendEvent),
+}));
+
+export const financialProfileRelations = relations(financialProfile, ({ one }) => ({
+  household: one(household, {
+    fields: [financialProfile.householdId],
+    references: [household.id],
+  }),
+}));
+
+export const budgetEnvelopeRelations = relations(budgetEnvelope, ({ one, many }) => ({
+  household: one(household, {
+    fields: [budgetEnvelope.householdId],
+    references: [household.id],
+  }),
+  spendEvents: many(spendEvent),
+}));
+
+export const monthCycleRelations = relations(monthCycle, ({ one, many }) => ({
+  household: one(household, {
+    fields: [monthCycle.householdId],
+    references: [household.id],
+  }),
+  spendEvents: many(spendEvent),
+}));
+
+export const spendEventRelations = relations(spendEvent, ({ one }) => ({
+  household: one(household, {
+    fields: [spendEvent.householdId],
+    references: [household.id],
+  }),
+  cycle: one(monthCycle, {
+    fields: [spendEvent.cycleId],
+    references: [monthCycle.id],
+  }),
+  envelope: one(budgetEnvelope, {
+    fields: [spendEvent.envelopeId],
+    references: [budgetEnvelope.id],
+  }),
 }));
 
 export const accountRelations = relations(account, ({ one, many }) => ({
