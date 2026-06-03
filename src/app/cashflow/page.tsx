@@ -6,7 +6,7 @@ import type { PacingColor } from "@/lib/cashflow/pacing";
 import { PageHeader } from "@/components/page-header";
 import { formatEUR } from "@/lib/format";
 import { SpendButton } from "./spend-button";
-import { ArrowRight, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowRight, Sparkles, TrendingUp, Settings } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,17 @@ export default async function CashflowPage() {
       <PageHeader
         title="Cap"
         subtitle={`${monthLabel} · jour ${data.dayOfMonth}/${data.daysInMonth}`}
-        action={<SpendButton envelopes={spendTargets} />}
+        action={
+          <div className="flex items-center gap-2">
+            <Link
+              href="/cashflow/setup"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
+            >
+              <Settings className="size-3.5" /> Configurer
+            </Link>
+            <SpendButton envelopes={spendTargets} />
+          </div>
+        }
       />
 
       <div className="space-y-6 p-4 md:space-y-8 md:p-8">
@@ -223,10 +233,16 @@ function EmptyState() {
       </p>
       <div className="mt-5 flex flex-col gap-2">
         <Link
-          href="/expenses"
+          href="/cashflow/setup"
           className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
-          <TrendingUp className="size-4" /> Saisir mes flux <ArrowRight className="size-4" />
+          <TrendingUp className="size-4" /> Configurer mon mois <ArrowRight className="size-4" />
+        </Link>
+        <Link
+          href="/expenses"
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          ou saisir d&apos;abord mes revenus & charges fixes
         </Link>
       </div>
     </div>

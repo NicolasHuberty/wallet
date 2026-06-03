@@ -743,7 +743,9 @@ export const projectionScenario = pgTable(
 // One row per household. Output of the onboarding "concierge" + global
 // cash-flow settings.
 export const profileComposition = ["single", "couple"] as const;
+export type ProfileComposition = (typeof profileComposition)[number];
 export const savingsTargetMode = ["fixed", "max"] as const;
+export type SavingsTargetMode = (typeof savingsTargetMode)[number];
 
 export const financialProfile = pgTable(
   "financial_profile",
