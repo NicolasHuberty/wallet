@@ -15,10 +15,12 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   Building2,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
+  { href: "/cashflow", label: "Cap", icon: Gauge },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/check-in", label: "Mise à jour mensuelle", icon: ClipboardCheck },
   { href: "/accounts", label: "Comptes", icon: Wallet },

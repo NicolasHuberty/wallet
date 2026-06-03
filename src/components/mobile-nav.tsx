@@ -21,6 +21,7 @@ import {
   X,
   Coins,
   Building2,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,7 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { href: "/cashflow", label: "Cap — reste-à-vivre", icon: Gauge },
   { href: "/investments", label: "Investissements", icon: TrendingUp },
   { href: "/real-estate", label: "Immobilier", icon: Home },
   { href: "/charges", label: "Frais one-shot", icon: CircleDollarSign },

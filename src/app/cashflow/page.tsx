@@ -1,0 +1,234 @@
+import Link from "next/link";
+import { getPrimaryHousehold } from "@/lib/queries";
+import { getCashflowDashboard, hasCashflowSetup } from "@/lib/cashflow/data";
+import type { CashflowDashboard, EnvelopeView } from "@/lib/cashflow/assemble";
+import type { PacingColor } from "@/lib/cashflow/pacing";
+import { PageHeader } from "@/components/page-header";
+import { formatEUR } from "@/lib/format";
+import { SpendButton } from "./spend-button";
+import { ArrowRight, Sparkles, TrendingUp } from "lucide-react";
+
+export const dynamic = "force-dynamic";
+
+const MONTHS_FR = [
+  "janvier",
+  "février",
+  "mars",
+  "avril",
+  "mai",
+  "juin",
+  "juillet",
+  "août",
+  "septembre",
+  "octobre",
+  "novembre",
+  "décembre",
+];
+
+export default async function CashflowPage() {
+  const h = await getPrimaryHousehold();
+  const ready = await hasCashflowSetup(h.id);
+
+  if (!ready) {
+    return (
+      <>
+        <PageHeader title="Cap" subtitle="Ton reste-à-vivre, en temps réel" />
+        <div className="p-4 md:p-8">
+          <EmptyState />
+        </div>
+      </>
+    );
+  }
+
+  const today = new Date();
+  const data = await getCashflowDashboard(h.id, today);
+  const monthLabel = `${MONTHS_FR[today.getUTCMonth()]} ${today.getUTCFullYear()}`;
+
+  const spendTargets = data.envelopes.map((e) => ({ id: e.id, label: e.label }));
+
+  return (
+    <>
+      <PageHeader
+        title="Cap"
+        subtitle={`${monthLabel} · jour ${data.dayOfMonth}/${data.daysInMonth}`}
+        action={<SpendButton envelopes={spendTargets} />}
+      />
+
+      <div className="space-y-6 p-4 md:space-y-8 md:p-8">
+        <Hero data={data} />
+
+        {data.envelopes.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-muted-foreground">
+              Enveloppes variables
+            </h2>
+            <div className="space-y-2">
+              {data.envelopes.map((e) => (
+                <EnvelopeRow key={e.id} env={e} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {data.upcoming.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-muted-foreground">
+              À venir d&apos;ici la fin du mois
+            </h2>
+            <div className="divide-y divide-border rounded-lg border border-border bg-card">
+              {data.upcoming.slice(0, 8).map((u, i) => (
+                <div key={i} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="w-7 text-center text-xs tabular-nums text-muted-foreground">
+                      {String(u.day).padStart(2, "0")}
+                    </span>
+                    <span className="font-medium">{u.label}</span>
+                  </div>
+                  <span
+                    className={`numeric tabular-nums font-medium ${
+                      u.kind === "income" ? "text-[var(--color-success)]" : ""
+                    }`}
+                  >
+                    {u.kind === "income" ? "+" : "−"}
+                    {formatEUR(u.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </>
+  );
+}
+
+const COLOR_VAR: Record<PacingColor, string> = {
+  neutral: "var(--muted-foreground)",
+  green: "var(--color-success)",
+  yellow: "var(--chart-4, #d4a017)",
+  orange: "#e08300",
+  red: "var(--destructive)",
+};
+
+function Hero({ data }: { data: CashflowDashboard }) {
+  const { safe } = data;
+  const accent = COLOR_VAR[safe.color];
+  const negative = safe.safeToSpend < 0;
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-6 md:p-8">
+      <div className="text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
+        Safe-to-spend
+      </div>
+      <div
+        className="numeric mt-2 text-5xl font-semibold tabular-nums md:text-6xl"
+        style={{ color: negative ? COLOR_VAR.red : undefined }}
+      >
+        {formatEUR(safe.budgetPerDay)}
+        <span className="ml-2 align-middle text-base font-normal text-muted-foreground">
+          / jour
+        </span>
+      </div>
+      <div className="mt-2 text-sm text-muted-foreground">
+        {negative ? (
+          <span style={{ color: COLOR_VAR.red }}>
+            {formatEUR(safe.safeToSpend)} sous le plan — on pioche dans le coussin.
+          </span>
+        ) : (
+          <>
+            <span className="font-medium text-foreground">
+              {formatEUR(safe.safeToSpend)}
+            </span>{" "}
+            libres sur {safe.daysRemaining} jour{safe.daysRemaining > 1 ? "s" : ""}.
+          </>
+        )}
+      </div>
+
+      {/* Jauge globale du mois */}
+      <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${Math.round((data.dayOfMonth / data.daysInMonth) * 100)}%`,
+            backgroundColor: accent,
+          }}
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+        <MiniStat label="Revenus" value={data.plannedIncome} tone="positive" />
+        <MiniStat label="Fixes" value={data.plannedFixed} tone="negative" />
+        <MiniStat label="Coussin restant" value={data.bufferRemaining} />
+      </div>
+    </section>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "positive" | "negative";
+}) {
+  const cls =
+    tone === "positive"
+      ? "text-[var(--color-success)]"
+      : tone === "negative"
+        ? "text-foreground"
+        : "text-foreground";
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`numeric mt-0.5 text-sm font-semibold tabular-nums ${cls}`}>
+        {formatEUR(value)}
+      </div>
+    </div>
+  );
+}
+
+function EnvelopeRow({ env }: { env: EnvelopeView }) {
+  const pct = env.planned > 0 ? Math.min(100, (env.consumed / env.planned) * 100) : 0;
+  const accent = COLOR_VAR[env.color];
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="mb-2 flex items-center justify-between text-sm">
+        <span className="font-medium">{env.label}</span>
+        <span className="numeric tabular-nums text-muted-foreground">
+          {formatEUR(env.consumed)} / {formatEUR(env.planned)}
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${pct}%`, backgroundColor: accent }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="mx-auto max-w-md rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
+      <div className="mx-auto flex size-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Sparkles className="size-6" />
+      </div>
+      <h2 className="mt-4 text-lg font-semibold">Configure ton mois</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        Ajoute tes revenus, tes charges fixes et tes enveloppes variables pour voir ton
+        Safe-to-Spend se calculer en temps réel.
+      </p>
+      <div className="mt-5 flex flex-col gap-2">
+        <Link
+          href="/expenses"
+          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <TrendingUp className="size-4" /> Saisir mes flux <ArrowRight className="size-4" />
+        </Link>
+      </div>
+    </div>
+  );
+}
