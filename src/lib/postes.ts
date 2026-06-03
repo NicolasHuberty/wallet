@@ -144,7 +144,19 @@ export async function listPostes(householdId: string): Promise<Poste[]> {
     db.select().from(schema.oneOffCharge).where(eq(schema.oneOffCharge.householdId, householdId)),
   ]);
 
-  const variable: Poste[] = envelopes.map((e) => ({
+  return [
+    ...envelopes.map(mapEnvelope),
+    ...recurrents.map(mapFixed),
+    ...oneoffs.map(mapOneoff),
+  ];
+}
+
+type EnvelopeRow = typeof schema.budgetEnvelope.$inferSelect;
+type RecurringRow = typeof schema.recurringExpense.$inferSelect;
+type OneOffRow = typeof schema.oneOffCharge.$inferSelect;
+
+function mapEnvelope(e: EnvelopeRow): Poste {
+  return {
     kind: "variable",
     id: e.id,
     label: e.label,
@@ -156,9 +168,11 @@ export async function listPostes(householdId: string): Promise<Poste[]> {
     cadence: e.cadence,
     rolloverPolicy: e.rolloverPolicy,
     occurrencesPerMonth: e.occurrencesPerMonth,
-  }));
+  };
+}
 
-  const fixed: Poste[] = recurrents.map((r) => ({
+function mapFixed(r: RecurringRow): Poste {
+  return {
     kind: "fixed",
     id: r.id,
     label: r.label,
@@ -169,9 +183,11 @@ export async function listPostes(householdId: string): Promise<Poste[]> {
     counterpartyPatterns: parseJsonArray(r.counterpartyPatterns),
     frequency: r.frequency,
     dayOfMonth: r.dayOfMonth,
-  }));
+  };
+}
 
-  const oneoff: Poste[] = oneoffs.map((c) => ({
+function mapOneoff(c: OneOffRow): Poste {
+  return {
     kind: "oneoff",
     id: c.id,
     label: c.label,
@@ -183,7 +199,28 @@ export async function listPostes(householdId: string): Promise<Poste[]> {
     date: c.date,
     propertyId: c.propertyId,
     includeInCostBasis: c.includeInCostBasis,
-  }));
+  };
+}
 
-  return [...variable, ...fixed, ...oneoff];
+/** Un poste précis (scan des 3 tables par id, scopé au household). */
+export async function getPoste(householdId: string, id: string): Promise<Poste | null> {
+  const [env] = await db
+    .select()
+    .from(schema.budgetEnvelope)
+    .where(and(eq(schema.budgetEnvelope.id, id), eq(schema.budgetEnvelope.householdId, householdId)));
+  if (env) return mapEnvelope(env);
+
+  const [rec] = await db
+    .select()
+    .from(schema.recurringExpense)
+    .where(and(eq(schema.recurringExpense.id, id), eq(schema.recurringExpense.householdId, householdId)));
+  if (rec && rec.flowType === "fixed") return mapFixed(rec);
+
+  const [oc] = await db
+    .select()
+    .from(schema.oneOffCharge)
+    .where(and(eq(schema.oneOffCharge.id, id), eq(schema.oneOffCharge.householdId, householdId)));
+  if (oc) return mapOneoff(oc);
+
+  return null;
 }
