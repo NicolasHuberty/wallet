@@ -6,7 +6,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { assertWritable } from "@/lib/demo";
 import { getPrimaryHousehold } from "@/lib/queries";
-import { envelopeCadence, rolloverPolicy, savingsTargetMode } from "@/db/schema";
+import {
+  envelopeCadence,
+  rolloverPolicy,
+  savingsTargetMode,
+  profileComposition,
+} from "@/db/schema";
 import {
   getCashflowDashboard,
   getBudgetEnvelopes,
@@ -312,4 +317,138 @@ export async function closeCycle() {
   revalidatePath("/cashflow/month");
   revalidatePath("/snapshots");
   return { alreadyClosed: false, toSavings: rollover.toSavings, actualSaved, varianceVsPlan };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Onboarding Concierge (Phase 6)
+// ──────────────────────────────────────────────────────────────────────
+
+const capOnboardingSchema = z.object({
+  composition: z.enum(profileComposition).default("single"),
+  childrenCount: z.coerce.number().int().min(0).default(0),
+  carsCount: z.coerce.number().int().min(0).default(0),
+  city: z.string().optional().nullable(),
+  bufferAmount: z.coerce.number().min(0).default(0),
+  savingsTargetMode: z.enum(savingsTargetMode).default("max"),
+  savingsTargetAmount: z.coerce.number().min(0).nullable().optional(),
+  incomes: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        amount: z.coerce.number().min(0),
+        dayOfMonth: z.coerce.number().int().min(1).max(31).nullable().optional(),
+        isVariable: z.boolean().default(false),
+        floorAmount: z.coerce.number().min(0).nullable().optional(),
+      }),
+    )
+    .default([]),
+  fixedExpenses: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        amount: z.coerce.number().min(0),
+        category: z.string().default("subscriptions"),
+        dayOfMonth: z.coerce.number().int().min(1).max(31).nullable().optional(),
+      }),
+    )
+    .default([]),
+  envelopes: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        category: z.string().default("other"),
+        monthlyAmount: z.coerce.number().min(0),
+        cadence: z.enum(envelopeCadence).default("monthly"),
+      }),
+    )
+    .default([]),
+});
+
+/**
+ * Finalise l'onboarding Concierge : profil, revenus datés, fixes datés et
+ * enveloppes en une transaction.
+ */
+export async function completeCapOnboarding(values: z.infer<typeof capOnboardingSchema>) {
+  assertWritable();
+  const p = capOnboardingSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const now = new Date();
+
+  // Profil (upsert).
+  const existing = await db
+    .select({ id: schema.financialProfile.id })
+    .from(schema.financialProfile)
+    .where(eq(schema.financialProfile.householdId, h.id))
+    .limit(1);
+  const profilePayload = {
+    composition: p.composition,
+    childrenCount: p.childrenCount,
+    carsCount: p.carsCount,
+    city: p.city ?? null,
+    bufferAmount: p.bufferAmount,
+    savingsTargetMode: p.savingsTargetMode,
+    savingsTargetAmount: p.savingsTargetMode === "fixed" ? p.savingsTargetAmount ?? 0 : null,
+    onboardingCompletedAt: now,
+    updatedAt: now,
+  };
+  if (existing[0]) {
+    await db
+      .update(schema.financialProfile)
+      .set(profilePayload)
+      .where(eq(schema.financialProfile.id, existing[0].id));
+  } else {
+    await db.insert(schema.financialProfile).values({ householdId: h.id, ...profilePayload });
+  }
+
+  // Revenus datés.
+  for (const i of p.incomes) {
+    if (i.amount <= 0 && !(i.isVariable && (i.floorAmount ?? 0) > 0)) continue;
+    await db.insert(schema.recurringIncome).values({
+      householdId: h.id,
+      label: i.label,
+      category: "salary",
+      amount: i.amount,
+      ownership: p.composition === "couple" ? "member" : "member",
+      startDate: now,
+      dayOfMonth: i.dayOfMonth ?? null,
+      isVariable: i.isVariable,
+      floorAmount: i.isVariable ? i.floorAmount ?? null : null,
+    });
+  }
+
+  // Fixes datés.
+  for (const e of p.fixedExpenses) {
+    if (e.amount <= 0) continue;
+    await db.insert(schema.recurringExpense).values({
+      householdId: h.id,
+      label: e.label,
+      category: e.category,
+      amount: e.amount,
+      ownership: "shared",
+      startDate: now,
+      dayOfMonth: e.dayOfMonth ?? null,
+      frequency: "monthly",
+      flowType: "fixed",
+      active: true,
+      autoConfirm: true,
+    });
+  }
+
+  // Enveloppes variables.
+  for (const env of p.envelopes) {
+    if (env.monthlyAmount <= 0) continue;
+    await db.insert(schema.budgetEnvelope).values({
+      householdId: h.id,
+      label: env.label,
+      category: env.category,
+      monthlyAmount: env.monthlyAmount,
+      cadence: env.cadence,
+      rolloverPolicy: "to_savings",
+      active: true,
+    });
+  }
+
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/setup");
+  revalidatePath("/expenses");
 }

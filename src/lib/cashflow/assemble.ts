@@ -50,6 +50,8 @@ export type SpendEventRow = {
   amount: number;
   envelopeId: string | null;
   chargedToBuffer: boolean;
+  /** Date de la dépense — sert au récap hebdomadaire. */
+  date?: Date;
 };
 
 export type AssembleInput = {
@@ -102,6 +104,10 @@ export type CashflowDashboard = {
   committedSavings: number;
   bufferRemaining: number;
   bufferAmount: number;
+  /** Consommation variable de la semaine en cours (récap hebdo). */
+  weekVariableConsumed: number;
+  /** Budget variable pro-rata de la semaine (jusqu'à aujourd'hui). */
+  weekVariablePlanned: number;
 };
 
 /** Montant effectif d'un revenu : plancher si variable. */
@@ -133,6 +139,15 @@ function fixedFlow(e: FixedExpenseRow): DatedFlow {
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
+}
+
+/** Lundi 00:00 UTC de la semaine contenant `date`. */
+export function startOfWeekUTC(date: Date): Date {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dow = d.getUTCDay(); // 0 = dimanche
+  const diff = dow === 0 ? 6 : dow - 1; // jours écoulés depuis lundi
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d;
 }
 
 export function assembleDashboard(input: AssembleInput): CashflowDashboard {
@@ -174,14 +189,17 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
   upcoming.sort((a, b) => a.day - b.day);
 
   // ── Consommation par enveloppe ─────────────────────────────────────
+  const weekStart = startOfWeekUTC(input.today);
   const consumedByEnvelope = new Map<string, number>();
   let bufferConsumed = 0;
+  let weekVariableConsumed = 0;
   for (const s of input.spendEvents) {
     if (s.chargedToBuffer || s.envelopeId === null) {
       bufferConsumed += s.amount;
     } else {
       consumedByEnvelope.set(s.envelopeId, (consumedByEnvelope.get(s.envelopeId) ?? 0) + s.amount);
     }
+    if (s.date && s.date >= weekStart) weekVariableConsumed += s.amount;
   }
 
   let plannedVariable = 0;
@@ -215,6 +233,13 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
   discretionaryConsumed += bufferConsumed;
   const discretionaryPlanned = plannedVariable + input.bufferAmount;
 
+  // Budget variable pro-rata de la semaine, du lundi à aujourd'hui inclus.
+  const daysIntoWeek = Math.min(
+    7,
+    Math.floor((input.today.getTime() - weekStart.getTime()) / 86_400_000) + 1,
+  );
+  const weekVariablePlanned = (discretionaryPlanned / dim) * daysIntoWeek;
+
   const safe = computeSafeToSpend({
     availableBalance: input.availableBalance,
     remainingIncome,
@@ -242,5 +267,7 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
     committedSavings: input.committedSavings,
     bufferRemaining,
     bufferAmount: input.bufferAmount,
+    weekVariableConsumed,
+    weekVariablePlanned,
   };
 }

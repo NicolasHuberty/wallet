@@ -164,6 +164,7 @@ export async function getCashflowDashboard(
       amount: s.amount,
       envelopeId: s.envelopeId,
       chargedToBuffer: s.chargedToBuffer,
+      date: s.date,
     })),
     committedSavings: dcaMonthly + fixedSavingsTarget,
     bufferAmount: profile?.bufferAmount ?? 0,

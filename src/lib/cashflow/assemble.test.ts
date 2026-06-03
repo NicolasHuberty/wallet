@@ -142,6 +142,20 @@ describe("assembleDashboard", () => {
     expect(d.envelopes).toHaveLength(0);
   });
 
+  it("agrège la consommation variable de la semaine en cours", () => {
+    // today = mardi 16 juin 2026 → semaine depuis lundi 15
+    const d = assembleDashboard(
+      baseInput({
+        spendEvents: [
+          { amount: 30, envelopeId: "env-courses", chargedToBuffer: false, date: new Date(Date.UTC(2026, 5, 15, 10)) }, // lundi → dans la semaine
+          { amount: 20, envelopeId: "env-bar", chargedToBuffer: false, date: new Date(Date.UTC(2026, 5, 9, 10)) }, // semaine précédente
+        ],
+      }),
+    );
+    expect(d.weekVariableConsumed).toBe(30);
+    expect(d.weekVariablePlanned).toBeGreaterThan(0);
+  });
+
   it("utilise le plancher pour un revenu variable", () => {
     const d = assembleDashboard(
       baseInput({

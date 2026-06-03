@@ -7,7 +7,7 @@ import { forecastEndOfMonth, type ForecastBand } from "@/lib/cashflow/month-fore
 import { PageHeader } from "@/components/page-header";
 import { formatEUR } from "@/lib/format";
 import { SpendButton } from "./spend-button";
-import { ArrowRight, Sparkles, TrendingUp, Settings, CalendarRange } from "lucide-react";
+import { ArrowRight, Sparkles, Settings, CalendarRange, Droplets } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +84,11 @@ export default async function CashflowPage() {
 
       <div className="space-y-6 p-4 md:space-y-8 md:p-8">
         <Hero data={data} forecast={forecast} />
+
+        <WeeklyRecap
+          consumed={data.weekVariableConsumed}
+          planned={data.weekVariablePlanned}
+        />
 
         {data.envelopes.length > 0 && (
           <section className="space-y-3">
@@ -203,6 +208,52 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
   );
 }
 
+function WeeklyRecap({ consumed, planned }: { consumed: number; planned: number }) {
+  const delta = planned - consumed;
+  const ahead = delta >= 0;
+  const pct = planned > 0 ? Math.min(100, (consumed / planned) * 100) : 0;
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 md:p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <Droplets className="size-4 text-[var(--color-success)]" /> Cette semaine
+        </h2>
+        <span className="numeric text-sm tabular-nums text-muted-foreground">
+          {formatEUR(consumed)} / {formatEUR(planned)}
+        </span>
+      </div>
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${pct}%`,
+            backgroundColor: ahead ? "var(--color-success)" : "#e08300",
+          }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {ahead ? (
+          <>
+            Tu es dans le rythme —{" "}
+            <span className="font-medium text-[var(--color-success)]">
+              {formatEUR(delta)} d&apos;avance
+            </span>{" "}
+            qui déborderont vers ton épargne.
+          </>
+        ) : (
+          <>
+            Un peu vite cette semaine :{" "}
+            <span className="font-medium" style={{ color: "#e08300" }}>
+              {formatEUR(-delta)} au-dessus
+            </span>{" "}
+            du rythme prévu.
+          </>
+        )}
+      </p>
+    </section>
+  );
+}
+
 function MiniStat({
   label,
   value,
@@ -257,21 +308,21 @@ function EmptyState() {
       </div>
       <h2 className="mt-4 text-lg font-semibold">Configure ton mois</h2>
       <p className="mt-1.5 text-sm text-muted-foreground">
-        Ajoute tes revenus, tes charges fixes et tes enveloppes variables pour voir ton
-        Safe-to-Spend se calculer en temps réel.
+        Laisse-toi guider par l&apos;audit en quelques minutes — il calcule ta capacité
+        d&apos;épargne et remplit ton mois automatiquement.
       </p>
       <div className="mt-5 flex flex-col gap-2">
         <Link
-          href="/cashflow/setup"
+          href="/cashflow/onboarding"
           className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
-          <TrendingUp className="size-4" /> Configurer mon mois <ArrowRight className="size-4" />
+          <Sparkles className="size-4" /> Lancer l&apos;audit guidé <ArrowRight className="size-4" />
         </Link>
         <Link
-          href="/expenses"
+          href="/cashflow/setup"
           className="text-xs text-muted-foreground hover:text-foreground"
         >
-          ou saisir d&apos;abord mes revenus & charges fixes
+          ou configurer manuellement
         </Link>
       </div>
     </div>
