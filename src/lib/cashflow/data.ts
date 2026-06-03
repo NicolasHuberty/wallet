@@ -1,7 +1,6 @@
 import { db, schema } from "@/db";
-import { and, eq, gte } from "drizzle-orm";
+import { and, eq, gte, lt, inArray } from "drizzle-orm";
 import { getAccounts, getActiveMortgages, getDcaPlans } from "@/lib/queries";
-import { isLiability } from "@/lib/labels";
 import {
   assembleDashboard,
   type AssembleInput,
@@ -9,6 +8,7 @@ import {
   type FixedExpenseRow,
   type IncomeRow,
 } from "./assemble";
+import { deriveSpendEvents } from "./affect";
 import { computeRollover, type RolloverResult } from "./rollover";
 
 /**
@@ -66,9 +66,11 @@ export async function getIncomeSources(householdId: string) {
     .where(eq(schema.recurringIncome.householdId, householdId));
 }
 
-/** Dépenses confirmées depuis le début du mois courant. */
+/** Dépenses confirmées du mois courant (bornées au mois, pour éviter qu'un
+ *  événement daté d'un mois futur ne fuite dans la consommation courante). */
 export async function getSpendEventsThisMonth(householdId: string, today: Date) {
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
   return db
     .select()
     .from(schema.spendEvent)
@@ -76,27 +78,54 @@ export async function getSpendEventsThisMonth(householdId: string, today: Date) 
       and(
         eq(schema.spendEvent.householdId, householdId),
         gte(schema.spendEvent.date, monthStart),
+        lt(schema.spendEvent.date, monthEnd),
       ),
     );
 }
 
-/** Solde de vie courante : compte dédié si défini, sinon cash + épargne. */
-function resolveBalance(
+/** Transactions bancaires du mois courant sur les comptes de vie courante —
+ *  base de l'affectation automatique aux enveloppes. */
+async function getSpendingCashflowsThisMonth(accountIds: string[], today: Date) {
+  if (accountIds.length === 0) return [];
+  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+  return db
+    .select({
+      amount: schema.accountCashflow.amount,
+      date: schema.accountCashflow.date,
+      category: schema.accountCashflow.category,
+      transferToAccountId: schema.accountCashflow.transferToAccountId,
+    })
+    .from(schema.accountCashflow)
+    .where(
+      and(
+        inArray(schema.accountCashflow.accountId, accountIds),
+        gte(schema.accountCashflow.date, monthStart),
+        lt(schema.accountCashflow.date, monthEnd),
+      ),
+    );
+}
+
+/**
+ * Comptes de vie courante : compte dédié si défini, sinon les comptes cash,
+ * sinon repli sur l'épargne. Retourne le solde dépensable ET les ids des comptes
+ * retenus — ces mêmes comptes alimentent l'affectation des transactions, ce qui
+ * garde le solde et la consommation parfaitement cohérents.
+ */
+function resolveSpendingAccounts(
   accounts: Awaited<ReturnType<typeof getAccounts>>,
   spendingAccountId: string | null | undefined,
-): number {
+): { ids: string[]; balance: number } {
   if (spendingAccountId) {
     const acc = accounts.find((a) => a.id === spendingAccountId);
-    if (acc) return acc.currentValue;
+    if (acc) return { ids: [acc.id], balance: acc.currentValue };
   }
-  // Par défaut, on ne compte QUE les comptes courants (cash) — l'épargne ne
-  // doit pas être considérée comme dépensable. Repli sur cash+épargne seulement
-  // s'il n'existe aucun compte courant.
-  const cash = accounts.filter((a) => !isLiability(a.kind) && a.kind === "cash");
-  if (cash.length > 0) return cash.reduce((s, a) => s + a.currentValue, 0);
-  return accounts
-    .filter((a) => !isLiability(a.kind) && a.kind === "savings")
-    .reduce((s, a) => s + a.currentValue, 0);
+  const cash = accounts.filter((a) => a.kind === "cash");
+  if (cash.length > 0) {
+    return { ids: cash.map((a) => a.id), balance: cash.reduce((s, a) => s + a.currentValue, 0) };
+  }
+  const savings = accounts.filter((a) => a.kind === "savings");
+  return { ids: savings.map((a) => a.id), balance: savings.reduce((s, a) => s + a.currentValue, 0) };
 }
 
 /**
@@ -168,9 +197,35 @@ export async function getCashflowDashboard(
   const fixedSavingsTarget =
     profile?.savingsTargetMode === "fixed" ? profile.savingsTargetAmount ?? 0 : 0;
 
+  // Comptes de vie courante : leur solde est le « dépensable », et leurs
+  // transactions du mois alimentent l'affectation automatique aux enveloppes.
+  const spending = resolveSpendingAccounts(accounts, profile?.spendingAccountId);
+  const cashflows = await getSpendingCashflowsThisMonth(spending.ids, today);
+
+  const affectEnvelopes = envelopes.map((e) => ({
+    id: e.id,
+    label: e.label,
+    category: e.category,
+    active: e.active,
+  }));
+
+  // Dépenses dérivées des transactions bancaires (affectation auto) + dépenses
+  // saisies à la main. On écarte les `spendEvent` déjà réconciliés à une
+  // transaction (`linkedCashflowId`) pour ne pas compter deux fois : les saisies
+  // manuelles couvrent surtout les espèces, complémentaires des paiements synchro.
+  const derivedSpend = deriveSpendEvents(cashflows, affectEnvelopes, today);
+  const manualSpend = spendEvents
+    .filter((s) => !s.linkedCashflowId)
+    .map((s) => ({
+      amount: s.amount,
+      envelopeId: s.envelopeId,
+      chargedToBuffer: s.chargedToBuffer,
+      date: s.date,
+    }));
+
   const input: AssembleInput = {
     today,
-    availableBalance: resolveBalance(accounts, profile?.spendingAccountId),
+    availableBalance: spending.balance,
     incomes,
     fixedExpenses,
     envelopes: envelopes.map((e) => ({
@@ -182,12 +237,7 @@ export async function getCashflowDashboard(
       occurrencesPerMonth: e.occurrencesPerMonth,
       active: e.active,
     })),
-    spendEvents: spendEvents.map((s) => ({
-      amount: s.amount,
-      envelopeId: s.envelopeId,
-      chargedToBuffer: s.chargedToBuffer,
-      date: s.date,
-    })),
+    spendEvents: [...manualSpend, ...derivedSpend],
     committedSavings: dcaMonthly + fixedSavingsTarget,
     bufferAmount: profile?.bufferAmount ?? 0,
   };
@@ -218,10 +268,9 @@ export async function getMonthOverview(
   today: Date = new Date(),
 ): Promise<MonthOverview> {
   const month = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
-  const [dashboard, envelopes, spendEvents, cycleRows] = await Promise.all([
+  const [dashboard, envelopes, cycleRows] = await Promise.all([
     getCashflowDashboard(householdId, today),
     getBudgetEnvelopes(householdId),
-    getSpendEventsThisMonth(householdId, today),
     db
       .select()
       .from(schema.monthCycle)
@@ -229,33 +278,24 @@ export async function getMonthOverview(
       .limit(1),
   ]);
 
-  const consumedByEnvelope = new Map<string, number>();
-  for (const s of spendEvents) {
-    if (s.chargedToBuffer || s.envelopeId === null) continue;
-    consumedByEnvelope.set(
-      s.envelopeId,
-      (consumedByEnvelope.get(s.envelopeId) ?? 0) + s.amount,
-    );
-  }
+  // Source unique de vérité : la consommation du dashboard (qui fusionne déjà
+  // les dépenses manuelles et celles dérivées des transactions bancaires).
+  const policyById = new Map(envelopes.map((e) => [e.id, e.rolloverPolicy]));
 
-  const activeEnvelopes = envelopes.filter((e) => e.active);
-  const envelopeLines: MonthEnvelopeLine[] = activeEnvelopes.map((e) => {
-    const consumed = consumedByEnvelope.get(e.id) ?? 0;
-    return {
-      id: e.id,
-      label: e.label,
-      planned: e.monthlyAmount,
-      consumed,
-      remaining: Math.max(0, e.monthlyAmount - consumed),
-    };
-  });
+  const envelopeLines: MonthEnvelopeLine[] = dashboard.envelopes.map((e) => ({
+    id: e.id,
+    label: e.label,
+    planned: e.planned,
+    consumed: e.consumed,
+    remaining: e.remaining,
+  }));
 
   const rolloverPreview = computeRollover(
-    activeEnvelopes.map((e) => ({
+    dashboard.envelopes.map((e) => ({
       id: e.id,
-      planned: e.monthlyAmount,
-      consumed: consumedByEnvelope.get(e.id) ?? 0,
-      policy: e.rolloverPolicy,
+      planned: e.planned,
+      consumed: e.consumed,
+      policy: policyById.get(e.id) ?? "to_savings",
     })),
   );
 
