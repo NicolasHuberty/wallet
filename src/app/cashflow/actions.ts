@@ -290,6 +290,75 @@ export async function deleteFixedCharge(values: z.infer<typeof deleteFixedCharge
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Sources de revenus (gestion directe dans Cap)
+// ──────────────────────────────────────────────────────────────────────
+
+const incomeSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(1),
+  amount: z.coerce.number().min(0),
+  dayOfMonth: z.coerce.number().int().min(1).max(31).nullable().optional(),
+  isVariable: z.boolean().default(false),
+  floorAmount: z.coerce.number().min(0).nullable().optional(),
+});
+
+/** Crée ou met à jour une source de revenu. */
+export async function saveIncomeSource(values: z.infer<typeof incomeSchema>) {
+  assertWritable();
+  const p = incomeSchema.parse(values);
+  const h = await getPrimaryHousehold();
+
+  const payload = {
+    label: p.label,
+    amount: p.amount,
+    dayOfMonth: p.dayOfMonth ?? null,
+    isVariable: p.isVariable,
+    floorAmount: p.isVariable ? p.floorAmount ?? null : null,
+    updatedAt: new Date(),
+  };
+
+  if (p.id) {
+    await db
+      .update(schema.recurringIncome)
+      .set(payload)
+      .where(
+        and(
+          eq(schema.recurringIncome.id, p.id),
+          eq(schema.recurringIncome.householdId, h.id),
+        ),
+      );
+  } else {
+    await db.insert(schema.recurringIncome).values({
+      householdId: h.id,
+      category: "salary",
+      ownership: "member",
+      startDate: new Date(),
+      ...payload,
+    });
+  }
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/setup");
+  revalidatePath("/expenses");
+}
+
+const deleteIncomeSchema = z.object({ id: z.string() });
+
+/** Supprime une source de revenu (ex. doublon). */
+export async function deleteIncomeSource(values: z.infer<typeof deleteIncomeSchema>) {
+  assertWritable();
+  const p = deleteIncomeSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  await db
+    .delete(schema.recurringIncome)
+    .where(
+      and(eq(schema.recurringIncome.id, p.id), eq(schema.recurringIncome.householdId, h.id)),
+    );
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/setup");
+  revalidatePath("/expenses");
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Cycle mensuel : ouverture / clôture (Phase 7)
 // ──────────────────────────────────────────────────────────────────────
 

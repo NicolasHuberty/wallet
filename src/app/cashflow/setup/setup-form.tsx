@@ -22,6 +22,8 @@ import {
   deleteEnvelope,
   saveFixedCharge,
   deleteFixedCharge,
+  saveIncomeSource,
+  deleteIncomeSource,
 } from "../actions";
 import type {
   AccountKind,
@@ -40,6 +42,15 @@ export type ProfileData = {
 };
 
 export type AccountOption = { id: string; name: string; kind: AccountKind };
+
+export type IncomeData = {
+  id: string;
+  label: string;
+  amount: number;
+  dayOfMonth: number | null;
+  isVariable: boolean;
+  floorAmount: number | null;
+};
 
 export type FixedChargeData = {
   id: string;
@@ -104,15 +115,18 @@ export function SetupForm({
   envelopes,
   accounts,
   fixedCharges,
+  incomes,
 }: {
   profile: ProfileData;
   envelopes: EnvelopeData[];
   accounts: AccountOption[];
   fixedCharges: FixedChargeData[];
+  incomes: IncomeData[];
 }) {
   return (
     <div className="space-y-8">
       <ProfileSection profile={profile} accounts={accounts} />
+      <IncomesSection incomes={incomes} />
       <FixedChargesSection charges={fixedCharges} />
       <EnvelopesSection envelopes={envelopes} />
     </div>
@@ -261,6 +275,185 @@ function ProfileSection({
         </Button>
       </div>
     </section>
+  );
+}
+
+function IncomesSection({ incomes }: { incomes: IncomeData[] }) {
+  const total = incomes.reduce(
+    (s, i) => s + (i.isVariable ? i.floorAmount ?? 0 : i.amount),
+    0,
+  );
+  return (
+    <section className="space-y-3">
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Revenus</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Salaires, allocations, loyers perçus. Supprime un éventuel doublon ici.
+          </p>
+        </div>
+        <span className="text-sm tabular-nums text-muted-foreground">{formatEUR(total)}/mois</span>
+      </div>
+      <div className="space-y-2">
+        {incomes.map((i) => (
+          <IncomeCard key={i.id} income={i} />
+        ))}
+        <IncomeCard />
+      </div>
+    </section>
+  );
+}
+
+function IncomeCard({ income }: { income?: IncomeData }) {
+  const router = useRouter();
+  const isNew = !income;
+  const [label, setLabel] = useState(income?.label ?? "");
+  const [amount, setAmount] = useState(income ? String(income.amount) : "");
+  const [day, setDay] = useState(income?.dayOfMonth ? String(income.dayOfMonth) : "");
+  const [isVariable, setIsVariable] = useState(income?.isVariable ?? false);
+  const [floor, setFloor] = useState(income?.floorAmount ? String(income.floorAmount) : "");
+  const [pending, start] = useTransition();
+
+  function save() {
+    if (!label.trim()) {
+      toast.error("Donne un nom au revenu.");
+      return;
+    }
+    start(async () => {
+      try {
+        await saveIncomeSource({
+          id: income?.id,
+          label: label.trim(),
+          amount: Number(amount) || 0,
+          dayOfMonth: day === "" ? null : Number(day),
+          isVariable,
+          floorAmount: isVariable ? Number(floor) || 0 : null,
+        });
+        toast.success(isNew ? "Revenu ajouté" : "Revenu mis à jour");
+        if (isNew) {
+          setLabel("");
+          setAmount("");
+          setDay("");
+        }
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Erreur");
+      }
+    });
+  }
+
+  function remove() {
+    if (!income) return;
+    start(async () => {
+      try {
+        await deleteIncomeSource({ id: income.id });
+        toast.success("Revenu supprimé");
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Erreur");
+      }
+    });
+  }
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        isNew ? "border-dashed border-border bg-muted/20" : "border-border bg-card"
+      }`}
+    >
+      <div className="grid items-end gap-3 md:grid-cols-[1.4fr_1fr_0.8fr_1fr_auto]">
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">
+            {isNew ? "Nouveau revenu" : "Libellé"}
+          </Label>
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Salaire, allocations…"
+            className={inputCls}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Montant / mois</Label>
+          <div className="relative">
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              className={moneyCls}
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
+              €
+            </span>
+          </div>
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Jour</Label>
+          <Input
+            type="number"
+            min={1}
+            max={31}
+            value={day}
+            onChange={(e) => setDay(e.target.value)}
+            placeholder="28"
+            className="h-9 text-sm"
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Type</Label>
+          <Select
+            value={isVariable ? "variable" : "fixed"}
+            onValueChange={(v) => setIsVariable(v === "variable")}
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fixed">Fixe</SelectItem>
+              <SelectItem value="variable">Variable</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button onClick={save} disabled={pending} size="icon" variant="outline" className="size-9">
+            {isNew ? <Plus className="size-4" /> : <Save className="size-4" />}
+          </Button>
+          {!isNew && (
+            <Button
+              onClick={remove}
+              disabled={pending}
+              size="icon"
+              variant="ghost"
+              className="size-9 text-destructive hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+      {isVariable && (
+        <div className="mt-2 grid gap-1.5 md:max-w-[12rem]">
+          <Label className="text-[11px] text-muted-foreground">Plancher garanti / mois</Label>
+          <div className="relative">
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="1"
+              value={floor}
+              onChange={(e) => setFloor(e.target.value)}
+              placeholder="0"
+              className={moneyCls}
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
+              €
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

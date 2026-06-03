@@ -58,6 +58,14 @@ export async function getFixedCharges(householdId: string) {
   return rows.filter((r) => r.flowType === "fixed");
 }
 
+/** Sources de revenus récurrents du household. */
+export async function getIncomeSources(householdId: string) {
+  return db
+    .select()
+    .from(schema.recurringIncome)
+    .where(eq(schema.recurringIncome.householdId, householdId));
+}
+
 /** Dépenses confirmées depuis le début du mois courant. */
 export async function getSpendEventsThisMonth(householdId: string, today: Date) {
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));

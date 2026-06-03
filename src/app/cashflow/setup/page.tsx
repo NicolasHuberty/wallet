@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { getPrimaryHousehold, getAccounts } from "@/lib/queries";
-import { getFinancialProfile, getBudgetEnvelopes, getFixedCharges } from "@/lib/cashflow/data";
+import {
+  getFinancialProfile,
+  getBudgetEnvelopes,
+  getFixedCharges,
+  getIncomeSources,
+} from "@/lib/cashflow/data";
 import { isLiability } from "@/lib/labels";
 import { PageHeader } from "@/components/page-header";
 import { ArrowLeft, Sparkles, ArrowRight } from "lucide-react";
@@ -10,18 +15,29 @@ import {
   type ProfileData,
   type AccountOption,
   type FixedChargeData,
+  type IncomeData,
 } from "./setup-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function CashflowSetupPage() {
   const h = await getPrimaryHousehold();
-  const [profileRow, envelopeRows, accountRows, fixedRows] = await Promise.all([
+  const [profileRow, envelopeRows, accountRows, fixedRows, incomeRows] = await Promise.all([
     getFinancialProfile(h.id),
     getBudgetEnvelopes(h.id),
     getAccounts(h.id),
     getFixedCharges(h.id),
+    getIncomeSources(h.id),
   ]);
+
+  const incomes: IncomeData[] = incomeRows.map((i) => ({
+    id: i.id,
+    label: i.label,
+    amount: i.amount,
+    dayOfMonth: i.dayOfMonth,
+    isVariable: i.isVariable,
+    floorAmount: i.floorAmount,
+  }));
 
   const profile: ProfileData = {
     bufferAmount: profileRow?.bufferAmount ?? 0,
@@ -95,6 +111,7 @@ export default async function CashflowSetupPage() {
             envelopes={envelopes}
             accounts={accounts}
             fixedCharges={fixedCharges}
+            incomes={incomes}
           />
         </div>
       </div>
