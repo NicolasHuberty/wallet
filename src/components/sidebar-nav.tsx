@@ -17,11 +17,13 @@ import {
   Building2,
   Gauge,
   Search,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/cashflow", label: "Cap", icon: Gauge },
+  { href: "/postes", label: "Postes", icon: Layers },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/check-in", label: "Mise à jour mensuelle", icon: ClipboardCheck },
   { href: "/accounts", label: "Comptes", icon: Wallet },
