@@ -983,6 +983,11 @@ export async function createRecurringExpenseFromCashflow(
 
   const amount = p.amount ?? Math.abs(cf.amount);
   const txCategory = EXPENSE_TO_TX[p.category];
+  // Contrepartie du poste (1er segment du libellé) → le poste capte ses
+  // transactions (page détail) et les futures identiques.
+  const counterparty = (cf.notes ?? "").split(/\s+[-—]\s+/)[0].trim();
+  const counterpartyPatterns =
+    counterparty.length >= 2 ? JSON.stringify([counterparty]) : null;
 
   const [created] = await db
     .insert(schema.recurringExpense)
@@ -997,14 +1002,20 @@ export async function createRecurringExpenseFromCashflow(
       flowType: "fixed",
       active: true,
       autoConfirm: true,
+      counterpartyPatterns,
       updatedAt: new Date(),
     })
     .returning();
 
-  // Classe la transaction d'origine.
+  // Classe la transaction d'origine et la lie au poste (réconciliation).
   await db
     .update(schema.accountCashflow)
-    .set({ category: txCategory, categorySource: "user", updatedAt: new Date() })
+    .set({
+      category: txCategory,
+      categorySource: "user",
+      linkedRecurringExpenseId: created.id,
+      updatedAt: new Date(),
+    })
     .where(eq(schema.accountCashflow.id, cf.id));
 
   // Règle de contrepartie pour les prochains prélèvements identiques.
@@ -1049,6 +1060,7 @@ export async function createRecurringExpenseFromCashflow(
 
   revalidatePath(`/accounts/${cf.accountId}`);
   revalidatePath("/expenses");
+  revalidatePath("/postes");
   revalidatePath("/cashflow");
   return { expenseId: created.id, label: created.label, bulkUpdated };
 }
