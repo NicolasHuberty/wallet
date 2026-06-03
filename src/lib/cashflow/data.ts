@@ -9,6 +9,7 @@ import {
   type FixedExpenseRow,
   type IncomeRow,
 } from "./assemble";
+import { computeRollover, type RolloverResult } from "./rollover";
 
 /**
  * Cash-flow ("Cap") — couche données serveur. Fetch les rows du household et
@@ -169,6 +170,73 @@ export async function getCashflowDashboard(
   };
 
   return assembleDashboard(input);
+}
+
+export type MonthEnvelopeLine = {
+  id: string;
+  label: string;
+  planned: number;
+  consumed: number;
+  remaining: number;
+};
+
+export type MonthOverview = {
+  month: string;
+  cycle: typeof schema.monthCycle.$inferSelect | null;
+  dashboard: CashflowDashboard;
+  envelopeLines: MonthEnvelopeLine[];
+  /** Débordement projeté si le mois finissait maintenant. */
+  rolloverPreview: RolloverResult;
+};
+
+/** Vue « Le mois » : cycle + plan vs réel + aperçu du débordement. */
+export async function getMonthOverview(
+  householdId: string,
+  today: Date = new Date(),
+): Promise<MonthOverview> {
+  const month = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
+  const [dashboard, envelopes, spendEvents, cycleRows] = await Promise.all([
+    getCashflowDashboard(householdId, today),
+    getBudgetEnvelopes(householdId),
+    getSpendEventsThisMonth(householdId, today),
+    db
+      .select()
+      .from(schema.monthCycle)
+      .where(and(eq(schema.monthCycle.householdId, householdId), eq(schema.monthCycle.month, month)))
+      .limit(1),
+  ]);
+
+  const consumedByEnvelope = new Map<string, number>();
+  for (const s of spendEvents) {
+    if (s.chargedToBuffer || s.envelopeId === null) continue;
+    consumedByEnvelope.set(
+      s.envelopeId,
+      (consumedByEnvelope.get(s.envelopeId) ?? 0) + s.amount,
+    );
+  }
+
+  const activeEnvelopes = envelopes.filter((e) => e.active);
+  const envelopeLines: MonthEnvelopeLine[] = activeEnvelopes.map((e) => {
+    const consumed = consumedByEnvelope.get(e.id) ?? 0;
+    return {
+      id: e.id,
+      label: e.label,
+      planned: e.monthlyAmount,
+      consumed,
+      remaining: Math.max(0, e.monthlyAmount - consumed),
+    };
+  });
+
+  const rolloverPreview = computeRollover(
+    activeEnvelopes.map((e) => ({
+      id: e.id,
+      planned: e.monthlyAmount,
+      consumed: consumedByEnvelope.get(e.id) ?? 0,
+      policy: e.rolloverPolicy,
+    })),
+  );
+
+  return { month, cycle: cycleRows[0] ?? null, dashboard, envelopeLines, rolloverPreview };
 }
 
 /** True si le household a de quoi afficher un dashboard utile. */

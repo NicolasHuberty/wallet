@@ -15,9 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { confirmSpend } from "./actions";
+import { confirmSpend, deleteSpend } from "./actions";
+import { guessEnvelope } from "@/lib/cashflow/guess";
 
-export type SpendTarget = { id: string; label: string };
+export type SpendTarget = { id: string; label: string; category: string; consumed: number };
 
 /**
  * Cash-flow ("Cap") — la « Spend Sheet » : confirmation d'une dépense variable
@@ -34,9 +35,15 @@ export function SpendButton({
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState<string | "buffer">(
-    envelopes[0]?.id ?? "buffer",
+    () => guessEnvelope(envelopes, new Date()) ?? "buffer",
   );
   const [pending, start] = useTransition();
+
+  // Re-devine l'enveloppe à chaque ouverture (le contexte temporel a pu changer).
+  function onOpenChange(next: boolean) {
+    if (next) setTarget(guessEnvelope(envelopes, new Date()) ?? "buffer");
+    setOpen(next);
+  }
 
   function submit() {
     const value = Number(amount);
@@ -46,12 +53,20 @@ export function SpendButton({
     }
     start(async () => {
       try {
-        await confirmSpend({
+        const { id } = await confirmSpend({
           amount: value,
           envelopeId: target === "buffer" ? null : target,
           chargedToBuffer: target === "buffer",
         });
-        toast.success("Dépense ajoutée");
+        toast.success("Dépense ajoutée", {
+          action: {
+            label: "Annuler",
+            onClick: () =>
+              deleteSpend({ id })
+                .then(() => router.refresh())
+                .catch(() => toast.error("Impossible d'annuler")),
+          },
+        });
         setAmount("");
         setOpen(false);
         router.refresh();
@@ -62,7 +77,7 @@ export function SpendButton({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger
         render={
           (trigger as React.ReactElement) ?? (

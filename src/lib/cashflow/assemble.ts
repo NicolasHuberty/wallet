@@ -92,12 +92,14 @@ export type CashflowDashboard = {
   month: string; // YYYY-MM
   dayOfMonth: number;
   daysInMonth: number;
+  availableBalance: number;
   safe: SafeToSpendResult;
   envelopes: EnvelopeView[];
   upcoming: UpcomingItem[];
   plannedIncome: number;
   plannedFixed: number;
   plannedVariable: number;
+  committedSavings: number;
   bufferRemaining: number;
   bufferAmount: number;
 };
@@ -230,12 +232,14 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
     month,
     dayOfMonth: day,
     daysInMonth: dim,
+    availableBalance: input.availableBalance,
     safe,
     envelopes,
     upcoming,
     plannedIncome,
     plannedFixed,
     plannedVariable,
+    committedSavings: input.committedSavings,
     bufferRemaining,
     bufferAmount: input.bufferAmount,
   };

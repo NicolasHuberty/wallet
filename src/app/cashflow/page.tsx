@@ -3,10 +3,11 @@ import { getPrimaryHousehold } from "@/lib/queries";
 import { getCashflowDashboard, hasCashflowSetup } from "@/lib/cashflow/data";
 import type { CashflowDashboard, EnvelopeView } from "@/lib/cashflow/assemble";
 import type { PacingColor } from "@/lib/cashflow/pacing";
+import { forecastEndOfMonth, type ForecastBand } from "@/lib/cashflow/month-forecast";
 import { PageHeader } from "@/components/page-header";
 import { formatEUR } from "@/lib/format";
 import { SpendButton } from "./spend-button";
-import { ArrowRight, Sparkles, TrendingUp, Settings } from "lucide-react";
+import { ArrowRight, Sparkles, TrendingUp, Settings, CalendarRange } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,18 @@ export default async function CashflowPage() {
   const data = await getCashflowDashboard(h.id, today);
   const monthLabel = `${MONTHS_FR[today.getUTCMonth()]} ${today.getUTCFullYear()}`;
 
-  const spendTargets = data.envelopes.map((e) => ({ id: e.id, label: e.label }));
+  const spendTargets = data.envelopes.map((e) => ({
+    id: e.id,
+    label: e.label,
+    category: e.category,
+    consumed: e.consumed,
+  }));
+
+  const variableRemaining = data.envelopes.reduce((s, e) => s + e.remaining, 0);
+  const forecast = forecastEndOfMonth({
+    projectedEndBalance: data.safe.projectedEndBalance,
+    uncertainRemaining: variableRemaining + data.bufferRemaining,
+  });
 
   return (
     <>
@@ -53,6 +65,12 @@ export default async function CashflowPage() {
         subtitle={`${monthLabel} · jour ${data.dayOfMonth}/${data.daysInMonth}`}
         action={
           <div className="flex items-center gap-2">
+            <Link
+              href="/cashflow/month"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
+            >
+              <CalendarRange className="size-3.5" /> Le mois
+            </Link>
             <Link
               href="/cashflow/setup"
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
@@ -65,7 +83,7 @@ export default async function CashflowPage() {
       />
 
       <div className="space-y-6 p-4 md:space-y-8 md:p-8">
-        <Hero data={data} />
+        <Hero data={data} forecast={forecast} />
 
         {data.envelopes.length > 0 && (
           <section className="space-y-3">
@@ -120,7 +138,7 @@ const COLOR_VAR: Record<PacingColor, string> = {
   red: "var(--destructive)",
 };
 
-function Hero({ data }: { data: CashflowDashboard }) {
+function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastBand }) {
   const { safe } = data;
   const accent = COLOR_VAR[safe.color];
   const negative = safe.safeToSpend < 0;
@@ -169,6 +187,17 @@ function Hero({ data }: { data: CashflowDashboard }) {
         <MiniStat label="Revenus" value={data.plannedIncome} tone="positive" />
         <MiniStat label="Fixes" value={data.plannedFixed} tone="negative" />
         <MiniStat label="Coussin restant" value={data.bufferRemaining} />
+      </div>
+
+      {/* Prévision Monte-Carlo de fin de mois */}
+      <div className="mt-4 flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
+        <CalendarRange className="size-3.5 shrink-0" />
+        <span>
+          Fin de mois estimée entre{" "}
+          <span className="font-medium text-foreground">{formatEUR(forecast.p10)}</span> et{" "}
+          <span className="font-medium text-foreground">{formatEUR(forecast.p90)}</span> selon tes
+          dépenses variables.
+        </span>
       </div>
     </section>
   );

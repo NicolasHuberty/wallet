@@ -148,6 +148,7 @@ export default async function ExpensesPage() {
                       id: e.id, label: e.label, category: e.category, amount: e.amount, ownership: e.ownership,
                       ownerMemberId: e.ownerMemberId, startDate: toDate(e.startDate).toISOString().slice(0, 10),
                       endDate: toDateOrNull(e.endDate)?.toISOString().slice(0, 10) ?? null,
+                      dayOfMonth: e.dayOfMonth, frequency: e.frequency, flowType: e.flowType, active: e.active,
                     }} />
                   </div>
                 </li>
@@ -199,6 +200,7 @@ export default async function ExpensesPage() {
                       id: i.id, label: i.label, category: i.category, amount: i.amount, ownership: i.ownership,
                       ownerMemberId: i.ownerMemberId, startDate: toDate(i.startDate).toISOString().slice(0, 10),
                       endDate: toDateOrNull(i.endDate)?.toISOString().slice(0, 10) ?? null,
+                      dayOfMonth: i.dayOfMonth, isVariable: i.isVariable, floorAmount: i.floorAmount,
                     }} />
                   </div>
                 </li>

@@ -7,6 +7,17 @@ import { z } from "zod";
 import { assertWritable } from "@/lib/demo";
 import { getPrimaryHousehold } from "@/lib/queries";
 import { envelopeCadence, rolloverPolicy, savingsTargetMode } from "@/db/schema";
+import {
+  getCashflowDashboard,
+  getBudgetEnvelopes,
+  getSpendEventsThisMonth,
+} from "@/lib/cashflow/data";
+import { computeRollover, type RolloverEnvelope } from "@/lib/cashflow/rollover";
+import { recomputeSnapshot } from "@/lib/snapshots";
+
+function currentMonth(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
 /**
  * Cash-flow ("Cap") — server actions du dashboard.
@@ -56,18 +67,22 @@ export async function confirmSpend(values: z.infer<typeof confirmSpendSchema>) {
     )
     .limit(1);
 
-  await db.insert(schema.spendEvent).values({
-    householdId: h.id,
-    cycleId: openCycle[0]?.id ?? null,
-    date: now,
-    amount: p.amount,
-    envelopeId,
-    chargedToBuffer: p.chargedToBuffer || envelopeId === null,
-    label: p.label ?? null,
-    source: "manual",
-  });
+  const [created] = await db
+    .insert(schema.spendEvent)
+    .values({
+      householdId: h.id,
+      cycleId: openCycle[0]?.id ?? null,
+      date: now,
+      amount: p.amount,
+      envelopeId,
+      chargedToBuffer: p.chargedToBuffer || envelopeId === null,
+      label: p.label ?? null,
+      source: "manual",
+    })
+    .returning({ id: schema.spendEvent.id });
 
   revalidatePath("/cashflow");
+  return { id: created.id };
 }
 
 const deleteSpendSchema = z.object({ id: z.string() });
@@ -183,4 +198,118 @@ export async function deleteEnvelope(values: z.infer<typeof deleteEnvelopeSchema
     );
   revalidatePath("/cashflow");
   revalidatePath("/cashflow/setup");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Cycle mensuel : ouverture / clôture (Phase 7)
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Ouvre (ou récupère) le cycle du mois courant en figeant le plan : revenus,
+ * fixes, variables, objectif d'épargne, coussin, solde d'ouverture.
+ */
+export async function openCycle() {
+  assertWritable();
+  const h = await getPrimaryHousehold();
+  const now = new Date();
+  const month = currentMonth(now);
+
+  const existing = await db
+    .select({ id: schema.monthCycle.id })
+    .from(schema.monthCycle)
+    .where(and(eq(schema.monthCycle.householdId, h.id), eq(schema.monthCycle.month, month)))
+    .limit(1);
+  if (existing[0]) return { id: existing[0].id, alreadyOpen: true };
+
+  const data = await getCashflowDashboard(h.id, now);
+  const [created] = await db
+    .insert(schema.monthCycle)
+    .values({
+      householdId: h.id,
+      month,
+      status: "open",
+      plannedIncome: data.plannedIncome,
+      plannedFixed: data.plannedFixed,
+      plannedVariable: data.plannedVariable,
+      savingsTarget: data.committedSavings,
+      bufferAmount: data.bufferAmount,
+      openingBalance: data.availableBalance,
+    })
+    .returning({ id: schema.monthCycle.id });
+
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/month");
+  return { id: created.id, alreadyOpen: false };
+}
+
+/**
+ * Clôture le cycle du mois courant : applique le débordement des enveloppes,
+ * fige le résultat (épargne réelle, écart au plan) et pousse un snapshot de
+ * patrimoine (jonction avec la partie patrimoine).
+ */
+export async function closeCycle() {
+  assertWritable();
+  const h = await getPrimaryHousehold();
+  const now = new Date();
+  const month = currentMonth(now);
+
+  const cycleRows = await db
+    .select()
+    .from(schema.monthCycle)
+    .where(and(eq(schema.monthCycle.householdId, h.id), eq(schema.monthCycle.month, month)))
+    .limit(1);
+  const cycle = cycleRows[0];
+  if (!cycle) throw new Error("Aucun cycle ouvert ce mois-ci.");
+  if (cycle.status === "closed") return { alreadyClosed: true, toSavings: 0 };
+
+  const [envelopes, spendEvents] = await Promise.all([
+    getBudgetEnvelopes(h.id),
+    getSpendEventsThisMonth(h.id, now),
+  ]);
+
+  const consumedByEnvelope = new Map<string, number>();
+  let bufferConsumed = 0;
+  for (const s of spendEvents) {
+    if (s.chargedToBuffer || s.envelopeId === null) bufferConsumed += s.amount;
+    else
+      consumedByEnvelope.set(
+        s.envelopeId,
+        (consumedByEnvelope.get(s.envelopeId) ?? 0) + s.amount,
+      );
+  }
+
+  const rolloverEnvelopes: RolloverEnvelope[] = envelopes
+    .filter((e) => e.active)
+    .map((e) => ({
+      id: e.id,
+      planned: e.monthlyAmount,
+      consumed: consumedByEnvelope.get(e.id) ?? 0,
+      policy: e.rolloverPolicy,
+    }));
+  const rollover = computeRollover(rolloverEnvelopes);
+
+  const variableConsumed =
+    [...consumedByEnvelope.values()].reduce((s, v) => s + v, 0) + bufferConsumed;
+  const discretionaryPlan = cycle.plannedVariable + cycle.bufferAmount;
+  const varianceVsPlan = discretionaryPlan - variableConsumed;
+  const actualSaved = cycle.savingsTarget + rollover.toSavings;
+
+  await db
+    .update(schema.monthCycle)
+    .set({
+      status: "closed",
+      closedAt: now,
+      actualSaved,
+      varianceVsPlan,
+      updatedAt: now,
+    })
+    .where(eq(schema.monthCycle.id, cycle.id));
+
+  // Jonction patrimoine : snapshot net worth à la clôture.
+  await recomputeSnapshot(h.id, now);
+
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/month");
+  revalidatePath("/snapshots");
+  return { alreadyClosed: false, toSavings: rollover.toSavings, actualSaved, varianceVsPlan };
 }

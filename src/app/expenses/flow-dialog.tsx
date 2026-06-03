@@ -25,6 +25,7 @@ import {
 import { expenseCategoryLabel, incomeCategoryLabel } from "@/lib/labels";
 
 type Member = { id: string; name: string };
+type FlowFreq = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 type Row = {
   id?: string;
   label?: string;
@@ -34,6 +35,21 @@ type Row = {
   ownerMemberId?: string | null;
   startDate?: string;
   endDate?: string | null;
+  // Champs cash-flow ("Cap")
+  dayOfMonth?: number | null;
+  frequency?: FlowFreq;
+  flowType?: "fixed" | "variable";
+  active?: boolean;
+  isVariable?: boolean;
+  floorAmount?: number | null;
+};
+
+const FREQ_LABEL: Record<FlowFreq, string> = {
+  weekly: "Hebdomadaire",
+  biweekly: "Quinzaine",
+  monthly: "Mensuel",
+  quarterly: "Trimestriel",
+  yearly: "Annuel",
 };
 
 export function FlowDialog({
@@ -68,7 +84,7 @@ export function FlowDialog({
       return;
     }
     start(async () => {
-      const payload = {
+      const base = {
         id: row?.id,
         householdId,
         label: form.label!,
@@ -78,9 +94,22 @@ export function FlowDialog({
         ownerMemberId: form.ownerMemberId ?? null,
         startDate: form.startDate ?? new Date().toISOString().slice(0, 10),
         endDate: form.endDate ?? null,
+        dayOfMonth: form.dayOfMonth ?? null,
       };
-      if (kind === "expense") await saveRecurringExpense(payload);
-      else await saveRecurringIncome(payload);
+      if (kind === "expense") {
+        await saveRecurringExpense({
+          ...base,
+          frequency: form.frequency ?? "monthly",
+          flowType: form.flowType ?? "fixed",
+          active: form.active ?? true,
+        });
+      } else {
+        await saveRecurringIncome({
+          ...base,
+          isVariable: form.isVariable ?? false,
+          floorAmount: form.floorAmount ?? null,
+        });
+      }
       toast.success(row ? "Mis à jour" : "Créé");
       setOpen(false);
     });
@@ -168,6 +197,101 @@ export function FlowDialog({
               <Label>Fin (optionnel)</Label>
               <Input type="date" value={form.endDate ?? ""} onChange={(e) => update("endDate", e.target.value)} className="h-11 text-base md:h-8 md:text-sm" />
             </div>
+          </div>
+
+          {/* ── Cash-flow ("Cap") ───────────────────────────────────── */}
+          <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3">
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Cash-flow · Cap
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>{kind === "expense" ? "Jour du mois" : "Jour de versement"}</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  inputMode="numeric"
+                  placeholder="ex. 12"
+                  value={form.dayOfMonth ?? ""}
+                  onChange={(e) =>
+                    update("dayOfMonth", e.target.value === "" ? null : Number(e.target.value))
+                  }
+                  className="h-11 text-base md:h-8 md:text-sm"
+                />
+              </div>
+
+              {kind === "expense" ? (
+                <>
+                  <div className="grid gap-2">
+                    <Label>Fréquence</Label>
+                    <Select
+                      value={form.frequency ?? "monthly"}
+                      onValueChange={(v) => update("frequency", v as FlowFreq)}
+                    >
+                      <SelectTrigger className="h-11 md:h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(FREQ_LABEL) as FlowFreq[]).map((k) => (
+                          <SelectItem key={k} value={k}>{FREQ_LABEL[k]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Type</Label>
+                    <Select
+                      value={form.flowType ?? "fixed"}
+                      onValueChange={(v) => update("flowType", v as "fixed" | "variable")}
+                    >
+                      <SelectTrigger className="h-11 md:h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed">Fixe daté (auto-déduit)</SelectItem>
+                        <SelectItem value="variable">Variable</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid gap-2">
+                    <Label>Revenu</Label>
+                    <Select
+                      value={form.isVariable ? "variable" : "fixed"}
+                      onValueChange={(v) => update("isVariable", v === "variable")}
+                    >
+                      <SelectTrigger className="h-11 md:h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed">Fixe (montant garanti)</SelectItem>
+                        <SelectItem value="variable">Variable (plancher)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {form.isVariable && (
+                    <div className="grid gap-2">
+                      <Label>Plancher garanti / mois</Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={form.floorAmount ?? ""}
+                          onChange={(e) =>
+                            update("floorAmount", e.target.value === "" ? null : Number(e.target.value))
+                          }
+                          className="h-11 pr-8 text-right tabular-nums text-base md:h-8 md:text-sm"
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">€</span>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {kind === "expense"
+                ? "Le jour + la fréquence permettent à Cap de déduire automatiquement cette charge de ton reste-à-vivre."
+                : "Pour un revenu variable, Cap calcule ton budget sur le plancher ; le surplus déborde vers l'épargne."}
+            </p>
           </div>
         </SheetBody>
         <SheetFooter className="flex items-center justify-between md:justify-between">
