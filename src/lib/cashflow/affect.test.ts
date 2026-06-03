@@ -65,29 +65,29 @@ describe("envelopeFineCategories", () => {
 describe("resolveEnvelope", () => {
   it("route les courses vers l'enveloppe Courses, pas Restaurants (collision food)", () => {
     const envelopes = [env("groc", "Courses", "food"), env("rest", "Restaurants", "food")];
-    expect(resolveEnvelope("food_groceries", envelopes)).toBe("groc");
-    expect(resolveEnvelope("food_restaurant", envelopes)).toBe("rest");
+    expect(resolveEnvelope("food_groceries", null, envelopes)).toBe("groc");
+    expect(resolveEnvelope("food_restaurant", null, envelopes)).toBe("rest");
   });
 
   it("repli grossier quand aucune enveloppe fine ne matche", () => {
     const envelopes = [env("t", "Transport", "transport")];
-    expect(resolveEnvelope("transport", envelopes)).toBe("t");
+    expect(resolveEnvelope("transport", null, envelopes)).toBe("t");
   });
 
   it("shopping retombe sur leisure en grossier si pas d'enveloppe shopping dédiée", () => {
     const envelopes = [env("l", "Vie sociale", "leisure")];
     // « Vie sociale » n'a aucun mot-clé → absorbe leisure+shopping → fine match.
-    expect(resolveEnvelope("shopping", envelopes)).toBe("l");
+    expect(resolveEnvelope("shopping", null, envelopes)).toBe("l");
   });
 
   it("→ null (coussin) si aucune enveloppe ne correspond", () => {
     const envelopes = [env("f", "Courses", "food")];
-    expect(resolveEnvelope("transport", envelopes)).toBeNull();
+    expect(resolveEnvelope("transport", null, envelopes)).toBeNull();
   });
 
   it("ignore les enveloppes inactives", () => {
     const envelopes = [env("t", "Transport", "transport", false)];
-    expect(resolveEnvelope("transport", envelopes)).toBeNull();
+    expect(resolveEnvelope("transport", null, envelopes)).toBeNull();
   });
 
   it("collision : préfère l'enveloppe la plus spécifique", () => {
@@ -95,7 +95,7 @@ describe("resolveEnvelope", () => {
       env("generic", "Bouffe", "food"), // {groceries, restaurant}
       env("groc", "Courses Delhaize", "food"), // {groceries}
     ];
-    expect(resolveEnvelope("food_groceries", envelopes)).toBe("groc");
+    expect(resolveEnvelope("food_groceries", null, envelopes)).toBe("groc");
   });
 });
 
@@ -107,7 +107,7 @@ describe("deriveSpendEvents", () => {
   ];
 
   it("transforme un débit catégorisé en consommation d'enveloppe (montant positif)", () => {
-    const rows = deriveSpendEvents([tx(-50, "food_groceries")], envelopes, NO_FIXED, today);
+    const rows = deriveSpendEvents([tx(-50, "food_groceries")], envelopes, NO_FIXED, [], today);
     expect(rows).toEqual([
       { amount: 50, envelopeId: "groc", chargedToBuffer: false, date: tx(-50, "food_groceries").date },
     ]);
@@ -123,6 +123,7 @@ describe("deriveSpendEvents", () => {
       ],
       envelopes,
       NO_FIXED,
+      [],
       today,
     );
     expect(rows).toEqual([]);
@@ -135,15 +136,15 @@ describe("deriveSpendEvents", () => {
       transferToAccountId: null,
       date: new Date(Date.UTC(2026, 6, 3, 12)),
     };
-    expect(deriveSpendEvents([julyTx], envelopes, NO_FIXED, today)).toEqual([]);
+    expect(deriveSpendEvents([julyTx], envelopes, NO_FIXED, [], today)).toEqual([]);
   });
 
   it("ignore un débit marqué comme virement interne même si catégorisé", () => {
-    expect(deriveSpendEvents([tx(-200, "food_groceries", 15, "acc-2")], envelopes, NO_FIXED, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-200, "food_groceries", 15, "acc-2")], envelopes, NO_FIXED, [], today)).toEqual([]);
   });
 
   it("impute au coussin une dépense variable sans enveloppe correspondante", () => {
-    const rows = deriveSpendEvents([tx(-30, "health")], envelopes, NO_FIXED, today);
+    const rows = deriveSpendEvents([tx(-30, "health")], envelopes, NO_FIXED, [], today);
     expect(rows).toHaveLength(1);
     expect(rows[0].envelopeId).toBeNull();
     expect(rows[0].chargedToBuffer).toBe(true);
@@ -154,13 +155,13 @@ describe("deriveSpendEvents", () => {
     // Mutualité catégorisée 'health', aucune enveloppe santé, mais une charge
     // fixe 'health' existe → déjà dans remainingFixed → ignorée.
     const fixed = new Set(["health"]);
-    expect(deriveSpendEvents([tx(-120, "health")], envelopes, fixed, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-120, "health")], envelopes, fixed, [], today)).toEqual([]);
   });
 
   it("une enveloppe dédiée prime sur la charge fixe de même catégorie", () => {
     const withHealthEnv = [...envelopes, env("med", "Pharmacie", "health")];
     const fixed = new Set(["health"]);
-    const rows = deriveSpendEvents([tx(-120, "health")], withHealthEnv, fixed, today);
+    const rows = deriveSpendEvents([tx(-120, "health")], withHealthEnv, fixed, [], today);
     expect(rows).toEqual([
       { amount: 120, envelopeId: "med", chargedToBuffer: false, date: tx(-120, "health").date },
     ]);
@@ -172,15 +173,42 @@ describe("deriveSpendEvents", () => {
       env("groc", "Courses", "food"),
       { id: "plz", label: "Plaisirs", category: "food", active: true, txCategories: ["food_restaurant"] },
     ];
-    expect(deriveSpendEvents([tx(-40, "food_restaurant")], custom, NO_FIXED, today)[0].envelopeId).toBe("plz");
-    expect(deriveSpendEvents([tx(-40, "food_groceries")], custom, NO_FIXED, today)[0].envelopeId).toBe("groc");
+    expect(deriveSpendEvents([tx(-40, "food_restaurant")], custom, NO_FIXED, [], today)[0].envelopeId).toBe("plz");
+    expect(deriveSpendEvents([tx(-40, "food_groceries")], custom, NO_FIXED, [], today)[0].envelopeId).toBe("groc");
+  });
+
+  it("route par contrepartie en priorité (counterpartyPatterns)", () => {
+    // « Carburant pro » revendique la contrepartie 'shell' bien que catégorie food.
+    const custom: AffectEnvelope[] = [
+      env("groc", "Courses", "food"),
+      { id: "carb", label: "Carburant pro", category: "transport", active: true, counterpartyPatterns: ["shell"] },
+    ];
+    const cf: AffectCashflow = {
+      amount: -55,
+      category: "food_groceries",
+      notes: "SHELL 7037 LES ISN",
+      transferToAccountId: null,
+      date: new Date(Date.UTC(2026, 5, 15, 12)),
+    };
+    expect(deriveSpendEvents([cf], custom, NO_FIXED, [], today)[0].envelopeId).toBe("carb");
+  });
+
+  it("exclut une dépense dont la contrepartie est revendiquée par une charge fixe", () => {
+    const cf: AffectCashflow = {
+      amount: -120,
+      category: "health",
+      notes: "ML MUTPLUS.BE Mutualité",
+      transferToAccountId: null,
+      date: new Date(Date.UTC(2026, 5, 15, 12)),
+    };
+    expect(deriveSpendEvents([cf], envelopes, NO_FIXED, ["mutplus"], today)).toEqual([]);
   });
 
   it("laisse de côté les transactions non classées (conservateur)", () => {
-    expect(deriveSpendEvents([tx(-25, null)], envelopes, NO_FIXED, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-25, null)], envelopes, NO_FIXED, [], today)).toEqual([]);
   });
 
   it("ignore les catégories inconnues / legacy", () => {
-    expect(deriveSpendEvents([tx(-25, "legacy_weird_value")], envelopes, NO_FIXED, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-25, "legacy_weird_value")], envelopes, NO_FIXED, [], today)).toEqual([]);
   });
 });

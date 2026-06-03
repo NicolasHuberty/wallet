@@ -1,4 +1,5 @@
 import type { TransactionCategory } from "@/lib/transaction-categorizer";
+import { matchesCounterparty } from "@/lib/counterparty-match";
 import type { SpendEventRow } from "./assemble";
 
 /**
@@ -30,6 +31,8 @@ export type AffectEnvelope = {
    * vérité du routage). Vide/null → repli sur l'heuristique de libellé.
    */
   txCategories?: TransactionCategory[] | null;
+  /** Contreparties revendiquées (règles) — priorité la plus haute au routage. */
+  counterpartyPatterns?: string[] | null;
 };
 
 /** Transaction bancaire brute, telle que stockée dans `accountCashflow`. */
@@ -39,6 +42,8 @@ export type AffectCashflow = {
   date: Date;
   /** Catégorie résolue (valeur de `transactionCategory`) ou null si non classée. */
   category: string | null;
+  /** Description (pour le matching de contrepartie). */
+  notes?: string | null;
   /** Renseigné si la transaction est un virement interne → jamais une dépense. */
   transferToAccountId: string | null;
 };
@@ -130,9 +135,11 @@ export function envelopeFineCategories(env: AffectEnvelope): Set<TransactionCate
 }
 
 /**
- * Résout l'enveloppe qui doit absorber une transaction de catégorie `txCategory`.
+ * Résout l'enveloppe qui doit absorber une transaction.
  * Retourne l'id d'enveloppe, ou `null` (→ imputée au coussin).
  *
+ *  0. CONTREPARTIE : enveloppe dont un `counterpartyPatterns` matche la description
+ *     (priorité la plus haute — « ce commerçant → cette enveloppe »).
  *  1. Candidats FINS : enveloppes dont l'ensemble absorbe cette catégorie exacte.
  *     - 1 → elle. - >1 → la plus spécifique (plus petit ensemble), tie-break id.
  *  2. Sinon, repli GROSSIER : enveloppe dont `category` = catégorie cible.
@@ -140,9 +147,13 @@ export function envelopeFineCategories(env: AffectEnvelope): Set<TransactionCate
  */
 export function resolveEnvelope(
   txCategory: TransactionCategory,
+  notes: string | null,
   envelopes: AffectEnvelope[],
 ): string | null {
   const active = envelopes.filter((e) => e.active);
+
+  const byCp = active.find((e) => matchesCounterparty(notes ?? null, e.counterpartyPatterns ?? []));
+  if (byCp) return byCp.id;
 
   const fine = active
     .map((e) => ({ e, set: envelopeFineCategories(e) }))
@@ -176,6 +187,7 @@ export function deriveSpendEvents(
   cashflows: AffectCashflow[],
   envelopes: AffectEnvelope[],
   fixedCategories: Set<string>,
+  fixedPatterns: string[],
   today: Date,
 ): SpendEventRow[] {
   const year = today.getUTCFullYear();
@@ -188,12 +200,15 @@ export function deriveSpendEvents(
     if (c.date.getUTCFullYear() !== year || c.date.getUTCMonth() !== month0) continue;
     if (!c.category) continue; // non classée → on ne devine pas (conservateur)
 
+    // Contrepartie revendiquée par une charge fixe (échéancier) → déjà comptée.
+    if (matchesCounterparty(c.notes ?? null, fixedPatterns)) continue;
+
     const cat = c.category as TransactionCategory;
     const target = TX_TO_ENVELOPE_CATEGORY[cat];
     // undefined (catégorie inconnue/legacy) OU null (revenu/virement/épargne/cash) → ignorée.
     if (target == null) continue;
 
-    const envelopeId = resolveEnvelope(cat, envelopes);
+    const envelopeId = resolveEnvelope(cat, c.notes ?? null, envelopes);
     if (envelopeId === null && fixedCategories.has(target)) {
       // Couverte par une charge fixe (échéancier) → ne pas double-compter.
       continue;

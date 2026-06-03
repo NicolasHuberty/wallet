@@ -316,6 +316,12 @@ export const recurringExpense = pgTable(
     active: boolean("active").notNull().default(true),
     // Fixed dated flows are deducted from Safe-to-Spend without a confirmation tap.
     autoConfirm: boolean("auto_confirm").notNull().default(true),
+    // Modèle « Poste » unifié — liaison aux transactions (JSON). `txCategories` =
+    // catégories de transaction couvertes ; `counterpartyPatterns` = contreparties
+    // (règles) que ce poste fixe revendique. Sert à exclure ces débits de la conso
+    // d'enveloppe (déjà dans l'échéancier) et au routage.
+    txCategories: text("tx_categories"),
+    counterpartyPatterns: text("counterparty_patterns"),
     ...timestamps,
   },
   (t) => [index("recurring_expense_household_id_idx").on(t.householdId)],
@@ -577,6 +583,9 @@ export const accountCashflow = pgTable(
     // For salary-like income, the specific recurringIncome row this
     // payment corresponds to (when the household has multiple salaries).
     linkedRecurringIncomeId: text("linked_recurring_income_id"),
+    // Réconciliation d'une charge fixe récurrente (loyer, mutuelle) — symétrique
+    // de linkedOneOffChargeId. Exclut le débit de la conso d'enveloppe.
+    linkedRecurringExpenseId: text("linked_recurring_expense_id"),
     ...timestamps,
   },
   (t) => [
@@ -803,6 +812,9 @@ export const budgetEnvelope = pgTable(
     // Source de vérité du routage transaction → enveloppe. NULL/vide = repli sur
     // l'heuristique de libellé + la correspondance grossière par catégorie.
     txCategories: text("tx_categories"),
+    // Contreparties (règles) que cette enveloppe revendique — JSON de motifs
+    // normalisés. Permet un routage précis « ce commerçant → cette enveloppe ».
+    counterpartyPatterns: text("counterparty_patterns"),
     // Monthly envelope amount (computed from unit cost × cadence at setup).
     monthlyAmount: real("monthly_amount").notNull(),
     cadence: text("cadence", { enum: envelopeCadence }).notNull().default("monthly"),

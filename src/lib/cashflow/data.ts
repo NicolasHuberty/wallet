@@ -19,6 +19,17 @@ import { computeRollover, type RolloverResult } from "./rollover";
  * action plus tard).
  */
 
+/** Parse un JSON de tableau de chaînes (motifs de contrepartie). */
+function parseStringArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 const TX_CATEGORY_SET = new Set<string>(transactionCategory);
 
 /** Parse le JSON `txCategories` d'une enveloppe → catégories valides (ou null). */
@@ -110,6 +121,7 @@ async function getSpendingCashflowsThisMonth(accountIds: string[], today: Date) 
       amount: schema.accountCashflow.amount,
       date: schema.accountCashflow.date,
       category: schema.accountCashflow.category,
+      notes: schema.accountCashflow.notes,
       transferToAccountId: schema.accountCashflow.transferToAccountId,
     })
     .from(schema.accountCashflow)
@@ -224,21 +236,28 @@ export async function getCashflowDashboard(
     category: e.category,
     active: e.active,
     txCategories: parseTxCategories(e.txCategories),
+    counterpartyPatterns: parseStringArray(e.counterpartyPatterns),
   }));
 
-  // Catégories revendiquées par les charges fixes actives (échéancier) — les
-  // dépenses qui y retombent sans enveloppe sont exclues de la dérivation pour
-  // ne pas être comptées deux fois (anticipées dans remainingFixed).
-  const fixedCategories = new Set<string>(
-    expensesRaw.filter((e) => e.flowType === "fixed" && e.active).map((e) => e.category),
-  );
+  // Charges fixes actives (échéancier). Les dépenses qui y retombent (par catégorie
+  // OU par contrepartie) sont exclues de la dérivation pour ne pas être comptées
+  // deux fois (déjà anticipées dans remainingFixed).
+  const activeFixed = expensesRaw.filter((e) => e.flowType === "fixed" && e.active);
+  const fixedCategories = new Set<string>(activeFixed.map((e) => e.category));
   if (mortgages.length > 0) fixedCategories.add("housing");
+  const fixedPatterns = activeFixed.flatMap((e) => parseStringArray(e.counterpartyPatterns));
 
   // Dépenses dérivées des transactions bancaires (affectation auto) + dépenses
   // saisies à la main. On écarte les `spendEvent` déjà réconciliés à une
   // transaction (`linkedCashflowId`) pour ne pas compter deux fois : les saisies
   // manuelles couvrent surtout les espèces, complémentaires des paiements synchro.
-  const derivedSpend = deriveSpendEvents(cashflows, affectEnvelopes, fixedCategories, today);
+  const derivedSpend = deriveSpendEvents(
+    cashflows,
+    affectEnvelopes,
+    fixedCategories,
+    fixedPatterns,
+    today,
+  );
   const manualSpend = spendEvents
     .filter((s) => !s.linkedCashflowId)
     .map((s) => ({
