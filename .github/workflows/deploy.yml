@@ -1,0 +1,35 @@
+name: Deploy to Coolify
+
+# Redéploie l'app prod (wallet.huberty.pro) à chaque push sur main.
+# L'API de deploy Coolify exige un Bearer token → impossible via un webhook
+# GitHub natif (pas d'en-tête custom). On passe donc par ce workflow, qui
+# appelle l'endpoint documenté. URL + token sont des secrets de repo
+# (le repo est public — rien de sensible dans ce fichier).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Un seul deploy à la fois ; un push plus récent annule le précédent en attente.
+concurrency:
+  group: coolify-deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify deploy
+        run: |
+          code=$(curl -sS -m 60 -o /tmp/resp.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_API_KEY }}" \
+            "${{ secrets.COOLIFY_DEPLOY_URL }}")
+          echo "HTTP $code"
+          cat /tmp/resp.json
+          echo
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::Coolify a renvoyé HTTP $code"
+            exit 1
+          fi
