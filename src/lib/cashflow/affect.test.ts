@@ -14,6 +14,8 @@ const env = (
   active = true,
 ): AffectEnvelope => ({ id, label, category, active });
 
+const NO_FIXED = new Set<string>();
+
 const tx = (
   amount: number,
   category: string | null,
@@ -105,7 +107,7 @@ describe("deriveSpendEvents", () => {
   ];
 
   it("transforme un débit catégorisé en consommation d'enveloppe (montant positif)", () => {
-    const rows = deriveSpendEvents([tx(-50, "food_groceries")], envelopes, today);
+    const rows = deriveSpendEvents([tx(-50, "food_groceries")], envelopes, NO_FIXED, today);
     expect(rows).toEqual([
       { amount: 50, envelopeId: "groc", chargedToBuffer: false, date: tx(-50, "food_groceries").date },
     ]);
@@ -120,6 +122,7 @@ describe("deriveSpendEvents", () => {
         tx(-100, "cash_withdrawal"),
       ],
       envelopes,
+      NO_FIXED,
       today,
     );
     expect(rows).toEqual([]);
@@ -132,26 +135,52 @@ describe("deriveSpendEvents", () => {
       transferToAccountId: null,
       date: new Date(Date.UTC(2026, 6, 3, 12)),
     };
-    expect(deriveSpendEvents([julyTx], envelopes, today)).toEqual([]);
+    expect(deriveSpendEvents([julyTx], envelopes, NO_FIXED, today)).toEqual([]);
   });
 
   it("ignore un débit marqué comme virement interne même si catégorisé", () => {
-    expect(deriveSpendEvents([tx(-200, "food_groceries", 15, "acc-2")], envelopes, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-200, "food_groceries", 15, "acc-2")], envelopes, NO_FIXED, today)).toEqual([]);
   });
 
   it("impute au coussin une dépense variable sans enveloppe correspondante", () => {
-    const rows = deriveSpendEvents([tx(-30, "health")], envelopes, today);
+    const rows = deriveSpendEvents([tx(-30, "health")], envelopes, NO_FIXED, today);
     expect(rows).toHaveLength(1);
     expect(rows[0].envelopeId).toBeNull();
     expect(rows[0].chargedToBuffer).toBe(true);
     expect(rows[0].amount).toBe(30);
   });
 
+  it("exclut une dépense couverte par une charge fixe (échéancier) — pas de double compte", () => {
+    // Mutualité catégorisée 'health', aucune enveloppe santé, mais une charge
+    // fixe 'health' existe → déjà dans remainingFixed → ignorée.
+    const fixed = new Set(["health"]);
+    expect(deriveSpendEvents([tx(-120, "health")], envelopes, fixed, today)).toEqual([]);
+  });
+
+  it("une enveloppe dédiée prime sur la charge fixe de même catégorie", () => {
+    const withHealthEnv = [...envelopes, env("med", "Pharmacie", "health")];
+    const fixed = new Set(["health"]);
+    const rows = deriveSpendEvents([tx(-120, "health")], withHealthEnv, fixed, today);
+    expect(rows).toEqual([
+      { amount: 120, envelopeId: "med", chargedToBuffer: false, date: tx(-120, "health").date },
+    ]);
+  });
+
+  it("respecte les txCategories explicites de l'enveloppe (override de l'heuristique)", () => {
+    // L'enveloppe « Plaisirs » revendique explicitement food_restaurant.
+    const custom: AffectEnvelope[] = [
+      env("groc", "Courses", "food"),
+      { id: "plz", label: "Plaisirs", category: "food", active: true, txCategories: ["food_restaurant"] },
+    ];
+    expect(deriveSpendEvents([tx(-40, "food_restaurant")], custom, NO_FIXED, today)[0].envelopeId).toBe("plz");
+    expect(deriveSpendEvents([tx(-40, "food_groceries")], custom, NO_FIXED, today)[0].envelopeId).toBe("groc");
+  });
+
   it("laisse de côté les transactions non classées (conservateur)", () => {
-    expect(deriveSpendEvents([tx(-25, null)], envelopes, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-25, null)], envelopes, NO_FIXED, today)).toEqual([]);
   });
 
   it("ignore les catégories inconnues / legacy", () => {
-    expect(deriveSpendEvents([tx(-25, "legacy_weird_value")], envelopes, today)).toEqual([]);
+    expect(deriveSpendEvents([tx(-25, "legacy_weird_value")], envelopes, NO_FIXED, today)).toEqual([]);
   });
 });

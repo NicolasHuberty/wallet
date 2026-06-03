@@ -9,6 +9,7 @@ import {
   type IncomeRow,
 } from "./assemble";
 import { deriveSpendEvents } from "./affect";
+import { transactionCategory, type TransactionCategory } from "@/lib/transaction-categorizer";
 import { computeRollover, type RolloverResult } from "./rollover";
 
 /**
@@ -17,6 +18,21 @@ import { computeRollover, type RolloverResult } from "./rollover";
  * le dashboard est lisible même sans cycle ouvert (ouverture explicite via une
  * action plus tard).
  */
+
+const TX_CATEGORY_SET = new Set<string>(transactionCategory);
+
+/** Parse le JSON `txCategories` d'une enveloppe → catégories valides (ou null). */
+function parseTxCategories(raw: string | null): TransactionCategory[] | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return null;
+    const valid = v.filter((x): x is TransactionCategory => typeof x === "string" && TX_CATEGORY_SET.has(x));
+    return valid.length > 0 ? valid : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Mensualise un montant DCA selon sa fréquence. */
 function monthlyizeDca(amount: number, frequency: string): number {
@@ -207,13 +223,22 @@ export async function getCashflowDashboard(
     label: e.label,
     category: e.category,
     active: e.active,
+    txCategories: parseTxCategories(e.txCategories),
   }));
+
+  // Catégories revendiquées par les charges fixes actives (échéancier) — les
+  // dépenses qui y retombent sans enveloppe sont exclues de la dérivation pour
+  // ne pas être comptées deux fois (anticipées dans remainingFixed).
+  const fixedCategories = new Set<string>(
+    expensesRaw.filter((e) => e.flowType === "fixed" && e.active).map((e) => e.category),
+  );
+  if (mortgages.length > 0) fixedCategories.add("housing");
 
   // Dépenses dérivées des transactions bancaires (affectation auto) + dépenses
   // saisies à la main. On écarte les `spendEvent` déjà réconciliés à une
   // transaction (`linkedCashflowId`) pour ne pas compter deux fois : les saisies
   // manuelles couvrent surtout les espèces, complémentaires des paiements synchro.
-  const derivedSpend = deriveSpendEvents(cashflows, affectEnvelopes, today);
+  const derivedSpend = deriveSpendEvents(cashflows, affectEnvelopes, fixedCategories, today);
   const manualSpend = spendEvents
     .filter((s) => !s.linkedCashflowId)
     .map((s) => ({

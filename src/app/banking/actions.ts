@@ -2,7 +2,7 @@
 
 import { db, schema } from "@/db";
 import { and, eq, inArray, lte, gte, isNull, sql } from "drizzle-orm";
-import { chargeCategory } from "@/db/schema";
+import { chargeCategory, expenseCategory, flowFrequency } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -882,6 +882,130 @@ export async function createOneOffChargeFromCashflow(
 // Convenience: list charge category presets for the UI picker
 export async function listChargeCategoryOptions() {
   return chargeCategory.map((c) => c);
+}
+
+// ─── Create a RECURRING fixed charge from a cashflow + link them ──────
+// Pour les prélèvements récurrents repérés sur le flux bancaire (mutualité,
+// loyer, abonnement annuel…). Crée une `recurringExpense` fixe (qui alimente
+// l'échéancier du Cap), classe la transaction et — par défaut — crée une règle
+// de contrepartie pour que les prochains prélèvements soient auto-classés (et,
+// étant des charges fixes, exclus de la conso d'enveloppe).
+
+const EXPENSE_TO_TX: Record<(typeof expenseCategory)[number], TransactionCategory> = {
+  housing: "housing",
+  utilities: "utilities",
+  food: "food_groceries",
+  transport: "transport",
+  insurance: "insurance",
+  subscriptions: "subscriptions",
+  leisure: "leisure",
+  health: "health",
+  childcare: "other_expense",
+  taxes: "tax",
+  other: "other_expense",
+};
+
+const createRecurringSchema = z.object({
+  cashflowId: z.string().min(1),
+  label: z.string().min(1),
+  category: z.enum(expenseCategory),
+  frequency: z.enum(flowFrequency),
+  dayOfMonth: z.number().int().min(1).max(31),
+  amount: z.number().positive().optional(),
+  createRule: z.boolean().default(true),
+});
+
+export async function createRecurringExpenseFromCashflow(
+  values: z.infer<typeof createRecurringSchema>,
+) {
+  assertWritable();
+  const p = createRecurringSchema.parse(values);
+  const h = await getPrimaryHousehold();
+
+  const [cf] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      amount: schema.accountCashflow.amount,
+      date: schema.accountCashflow.date,
+      notes: schema.accountCashflow.notes,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  if (!cf || cf.householdId !== h.id) throw new Error("Mouvement introuvable");
+
+  const amount = p.amount ?? Math.abs(cf.amount);
+  const txCategory = EXPENSE_TO_TX[p.category];
+
+  const [created] = await db
+    .insert(schema.recurringExpense)
+    .values({
+      householdId: h.id,
+      label: p.label,
+      category: p.category,
+      amount,
+      startDate: cf.date as unknown as Date,
+      dayOfMonth: p.dayOfMonth,
+      frequency: p.frequency,
+      flowType: "fixed",
+      active: true,
+      autoConfirm: true,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  // Classe la transaction d'origine.
+  await db
+    .update(schema.accountCashflow)
+    .set({ category: txCategory, categorySource: "user", updatedAt: new Date() })
+    .where(eq(schema.accountCashflow.id, cf.id));
+
+  // Règle de contrepartie pour les prochains prélèvements identiques.
+  let bulkUpdated = 0;
+  if (p.createRule) {
+    const pattern = normalizeBceName(cf.notes ?? "");
+    if (pattern && pattern.length >= 3) {
+      const existing = await db
+        .select()
+        .from(schema.categoryRule)
+        .where(
+          and(
+            eq(schema.categoryRule.householdId, h.id),
+            eq(schema.categoryRule.matcherType, "counterparty_exact"),
+            eq(schema.categoryRule.pattern, pattern),
+          ),
+        );
+      if (existing[0]) {
+        await db
+          .update(schema.categoryRule)
+          .set({ category: txCategory, updatedAt: new Date() })
+          .where(eq(schema.categoryRule.id, existing[0].id));
+      } else {
+        await db.insert(schema.categoryRule).values({
+          householdId: h.id,
+          matcherType: "counterparty_exact",
+          pattern,
+          category: txCategory,
+          priority: 10,
+          updatedAt: new Date(),
+        });
+      }
+      const r = await applyCategoryToSimilarCashflows(
+        h.id,
+        { type: "counterparty_exact", pattern },
+        txCategory,
+        null,
+      );
+      bulkUpdated = r.updated;
+    }
+  }
+
+  revalidatePath(`/accounts/${cf.accountId}`);
+  revalidatePath("/expenses");
+  revalidatePath("/cashflow");
+  return { expenseId: created.id, label: created.label, bulkUpdated };
 }
 
 // ─── Manually link a cashflow to a BCE company ───────────────────────

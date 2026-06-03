@@ -25,6 +25,11 @@ export type AffectEnvelope = {
   label: string;
   category: string;
   active: boolean;
+  /**
+   * Catégories de transaction explicitement absorbées par l'enveloppe (source de
+   * vérité du routage). Vide/null → repli sur l'heuristique de libellé.
+   */
+  txCategories?: TransactionCategory[] | null;
 };
 
 /** Transaction bancaire brute, telle que stockée dans `accountCashflow`. */
@@ -82,6 +87,10 @@ function normalize(s: string): string {
  * les presets d'onboarding en créent par défaut).
  */
 export function envelopeFineCategories(env: AffectEnvelope): Set<TransactionCategory> {
+  // Configuration explicite (panier de catégories) → source de vérité.
+  if (env.txCategories && env.txCategories.length > 0) {
+    return new Set(env.txCategories);
+  }
   const label = normalize(env.label);
   switch (env.category) {
     case "food": {
@@ -155,10 +164,17 @@ export function resolveEnvelope(
  * Dérive les `SpendEventRow` synthétiques d'un mois à partir des transactions
  * bancaires. Ne retient que les SORTIES (montant < 0), du mois courant, non
  * virements internes, classées en dépense variable d'enveloppe.
+ *
+ * `fixedCategories` = catégories d'enveloppe (`expenseCategory`) revendiquées par
+ * les charges fixes actives du household (échéancier). Une dépense qui retombe sur
+ * une de ces catégories sans enveloppe dédiée est IGNORÉE : elle est déjà
+ * anticipée dans `remainingFixed` et son débit a déjà baissé le solde — la router
+ * vers le coussin la compterait deux fois.
  */
 export function deriveSpendEvents(
   cashflows: AffectCashflow[],
   envelopes: AffectEnvelope[],
+  fixedCategories: Set<string>,
   today: Date,
 ): SpendEventRow[] {
   const year = today.getUTCFullYear();
@@ -171,11 +187,17 @@ export function deriveSpendEvents(
     if (c.date.getUTCFullYear() !== year || c.date.getUTCMonth() !== month0) continue;
     if (!c.category) continue; // non classée → on ne devine pas (conservateur)
 
-    const target = TX_TO_ENVELOPE_CATEGORY[c.category as TransactionCategory];
+    const cat = c.category as TransactionCategory;
+    const target = TX_TO_ENVELOPE_CATEGORY[cat];
     // undefined (catégorie inconnue/legacy) OU null (revenu/virement/épargne/cash) → ignorée.
     if (target == null) continue;
 
-    const envelopeId = resolveEnvelope(c.category as TransactionCategory, envelopes);
+    const envelopeId = resolveEnvelope(cat, envelopes);
+    if (envelopeId === null && fixedCategories.has(target)) {
+      // Couverte par une charge fixe (échéancier) → ne pas double-compter.
+      continue;
+    }
+
     out.push({
       amount: Math.abs(c.amount),
       envelopeId,

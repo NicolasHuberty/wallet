@@ -1,0 +1,1 @@
+ALTER TABLE "budget_envelope" ADD COLUMN "tx_categories" text;

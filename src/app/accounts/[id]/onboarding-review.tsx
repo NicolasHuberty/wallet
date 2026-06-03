@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, SkipForward, Receipt } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, SkipForward, Receipt, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import {
@@ -23,7 +23,45 @@ import {
 import {
   setCashflowCategoryWithRule,
   createOneOffChargeFromCashflow,
+  createRecurringExpenseFromCashflow,
 } from "@/app/banking/actions";
+
+// Libellés FR des catégories de charge fixe (expenseCategory) et des fréquences.
+const EXPENSE_CATEGORY_LABEL: Record<string, string> = {
+  housing: "Logement",
+  utilities: "Énergie & eau",
+  food: "Alimentation",
+  transport: "Transport",
+  insurance: "Assurances",
+  subscriptions: "Abonnements",
+  leisure: "Loisirs",
+  health: "Santé",
+  childcare: "Garde d'enfants",
+  taxes: "Impôts & taxes",
+  other: "Autre",
+};
+const FREQUENCY_LABEL: Record<string, string> = {
+  weekly: "Hebdomadaire",
+  biweekly: "Bimensuel",
+  monthly: "Mensuel",
+  quarterly: "Trimestriel",
+  yearly: "Annuel",
+};
+// Devine une catégorie de charge fixe à partir de la catégorie de transaction.
+const TX_TO_EXPENSE: Partial<Record<TransactionCategory, string>> = {
+  housing: "housing",
+  utilities: "utilities",
+  telecom_internet: "utilities",
+  food_groceries: "food",
+  food_restaurant: "food",
+  transport: "transport",
+  subscriptions: "subscriptions",
+  health: "health",
+  leisure: "leisure",
+  shopping: "leisure",
+  insurance: "insurance",
+  tax: "taxes",
+};
 import {
   TransactionEditDialog,
   type HouseholdAccountOption,
@@ -171,10 +209,13 @@ function ReviewWizard({
   // When true, the underlying TransactionEditDialog opens with the
   // "create one-off charge" form already expanded.
   const [advancedCreateCharge, setAdvancedCreateCharge] = useState(false);
+  // Formulaire "charge récurrente" déplié pour la transaction courante.
+  const [recurringOpen, setRecurringOpen] = useState(false);
   const current = rows[idx];
 
   function advance() {
     setAdvanced(false);
+    setRecurringOpen(false);
     if (idx + 1 < rows.length) {
       setIdx((i) => i + 1);
     } else {
@@ -238,6 +279,37 @@ function ReviewWizard({
           includeInCostBasis: false,
         });
         toast.success(`Frais "${r.label}" créé et lié`);
+        advance();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    });
+  }
+
+  function createRecurring(payload: {
+    label: string;
+    amount: number;
+    category: string;
+    frequency: string;
+    dayOfMonth: number;
+  }) {
+    if (!current) return;
+    start(async () => {
+      try {
+        const r = await createRecurringExpenseFromCashflow({
+          cashflowId: current.id,
+          label: payload.label,
+          category: payload.category as never,
+          frequency: payload.frequency as never,
+          dayOfMonth: payload.dayOfMonth,
+          amount: payload.amount,
+          createRule: true,
+        });
+        toast.success(
+          r.bulkUpdated > 1
+            ? `Charge "${r.label}" créée — ${r.bulkUpdated} prélèvements similaires classés`
+            : `Charge récurrente "${r.label}" créée et ajoutée à l'échéancier`,
+        );
         advance();
       } catch (e) {
         toast.error((e as Error).message);
@@ -443,6 +515,34 @@ function ReviewWizard({
               </div>
             </div>
 
+            {/* Recurring fixed charge — only on negative rows */}
+            {current.amount < 0 && (
+              <div className="rounded-md border border-[var(--chart-1)]/40 bg-[var(--chart-1)]/5 p-3">
+                <button
+                  type="button"
+                  onClick={() => setRecurringOpen((o) => !o)}
+                  className="flex w-full items-center gap-1.5 text-xs font-medium text-foreground"
+                >
+                  <Repeat className="size-3.5 text-[var(--chart-1)]" />
+                  Prélèvement récurrent ? (mutualité, loyer, abonnement…)
+                  <ChevronRight
+                    className={`ml-auto size-3.5 transition-transform ${recurringOpen ? "rotate-90" : ""}`}
+                  />
+                </button>
+                {recurringOpen && (
+                  <RecurringChargeForm
+                    key={current.id}
+                    notes={current.notes}
+                    amount={Math.abs(current.amount)}
+                    date={current.date}
+                    suggestedCategory={current.category as TransactionCategory | null}
+                    pending={pending}
+                    onSubmit={createRecurring}
+                  />
+                )}
+              </div>
+            )}
+
             {/* Exceptional charge shortcut — only on negative rows */}
             {current.amount < 0 && (
               <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
@@ -537,5 +637,116 @@ function ReviewWizard({
         initialCreateChargeOpen={advancedCreateCharge}
       />
     </>
+  );
+}
+
+function RecurringChargeForm({
+  notes,
+  amount,
+  date,
+  suggestedCategory,
+  pending,
+  onSubmit,
+}: {
+  notes: string | null;
+  amount: number;
+  date: Date | string;
+  suggestedCategory: TransactionCategory | null;
+  pending: boolean;
+  onSubmit: (p: {
+    label: string;
+    amount: number;
+    category: string;
+    frequency: string;
+    dayOfMonth: number;
+  }) => void;
+}) {
+  const parsedDate = new Date(date);
+  const defaultDay = isNaN(parsedDate.getTime()) ? 1 : parsedDate.getUTCDate();
+  const defaultLabel = (notes ?? "").split(/\s+[-—]\s+/)[0]?.trim().slice(0, 40) || "Charge récurrente";
+  const defaultCategory = (suggestedCategory && TX_TO_EXPENSE[suggestedCategory]) || "other";
+
+  const [label, setLabel] = useState(defaultLabel);
+  const [amountStr, setAmountStr] = useState(String(amount));
+  const [category, setCategory] = useState(defaultCategory);
+  const [frequency, setFrequency] = useState("monthly");
+  const [dayOfMonth, setDayOfMonth] = useState(defaultDay);
+
+  const inputCls =
+    "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs focus:border-foreground focus:outline-none";
+
+  function submit() {
+    const amt = parseFloat(amountStr.replace(",", "."));
+    if (!label.trim()) return toast.error("Donne un libellé à la charge");
+    if (!Number.isFinite(amt) || amt <= 0) return toast.error("Montant invalide");
+    onSubmit({ label: label.trim(), amount: amt, category, frequency, dayOfMonth });
+  }
+
+  return (
+    <div className="mt-3 space-y-2.5">
+      <div>
+        <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+          Libellé
+        </label>
+        <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Montant (€)
+          </label>
+          <input
+            className={`${inputCls} numeric tabular-nums`}
+            inputMode="decimal"
+            value={amountStr}
+            onChange={(e) => setAmountStr(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Fréquence
+          </label>
+          <select className={inputCls} value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+            {Object.entries(FREQUENCY_LABEL).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Jour du mois
+          </label>
+          <input
+            className={`${inputCls} numeric tabular-nums`}
+            type="number"
+            min={1}
+            max={31}
+            value={dayOfMonth}
+            onChange={(e) => setDayOfMonth(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground">
+            Catégorie
+          </label>
+          <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
+            {Object.entries(EXPENSE_CATEGORY_LABEL).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <Button size="sm" className="w-full" onClick={submit} disabled={pending}>
+        <Repeat className="size-3.5" /> Créer la charge récurrente
+      </Button>
+      <p className="text-[10px] text-muted-foreground">
+        Ajoutée à l&apos;échéancier du Cap. Les prochains prélèvements de la même contrepartie
+        seront auto-classés et exclus des enveloppes (déjà comptés en charge fixe).
+      </p>
+    </div>
   );
 }

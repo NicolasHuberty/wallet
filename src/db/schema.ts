@@ -798,6 +798,11 @@ export const budgetEnvelope = pgTable(
     label: text("label").notNull(),
     // Free-text category: presets (expenseCategory) or user-defined string.
     category: text("category").notNull(),
+    // Cash-flow : catégories de transaction (valeurs `transactionCategory`) que
+    // cette enveloppe absorbe, stockées en JSON (ex. '["food_groceries"]').
+    // Source de vérité du routage transaction → enveloppe. NULL/vide = repli sur
+    // l'heuristique de libellé + la correspondance grossière par catégorie.
+    txCategories: text("tx_categories"),
     // Monthly envelope amount (computed from unit cost × cadence at setup).
     monthlyAmount: real("monthly_amount").notNull(),
     cadence: text("cadence", { enum: envelopeCadence }).notNull().default("monthly"),
