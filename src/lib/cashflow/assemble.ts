@@ -102,6 +102,12 @@ export type CashflowDashboard = {
   plannedFixed: number;
   plannedVariable: number;
   committedSavings: number;
+  /** Revenus datés encore à venir ce mois (composante du Safe-to-Spend). */
+  remainingIncome: number;
+  /** Charges fixes datées encore à venir ce mois. */
+  remainingFixed: number;
+  /** Reste des enveloppes variables (planifié − consommé). */
+  variableRemaining: number;
   bufferRemaining: number;
   bufferAmount: number;
   /** Consommation variable de la semaine en cours (récap hebdo). */
@@ -265,6 +271,9 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
     plannedFixed,
     plannedVariable,
     committedSavings: input.committedSavings,
+    remainingIncome,
+    remainingFixed,
+    variableRemaining,
     bufferRemaining,
     bufferAmount: input.bufferAmount,
     weekVariableConsumed,

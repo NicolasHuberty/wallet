@@ -81,8 +81,13 @@ function resolveBalance(
     const acc = accounts.find((a) => a.id === spendingAccountId);
     if (acc) return acc.currentValue;
   }
+  // Par défaut, on ne compte QUE les comptes courants (cash) — l'épargne ne
+  // doit pas être considérée comme dépensable. Repli sur cash+épargne seulement
+  // s'il n'existe aucun compte courant.
+  const cash = accounts.filter((a) => !isLiability(a.kind) && a.kind === "cash");
+  if (cash.length > 0) return cash.reduce((s, a) => s + a.currentValue, 0);
   return accounts
-    .filter((a) => !isLiability(a.kind) && (a.kind === "cash" || a.kind === "savings"))
+    .filter((a) => !isLiability(a.kind) && a.kind === "savings")
     .reduce((s, a) => s + a.currentValue, 0);
 }
 

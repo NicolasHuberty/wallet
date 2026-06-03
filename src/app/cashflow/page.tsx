@@ -194,6 +194,29 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
         <MiniStat label="Coussin restant" value={data.bufferRemaining} />
       </div>
 
+      {/* D'où vient ce chiffre ? */}
+      <details className="mt-4 border-t border-border pt-3 text-sm">
+        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+          D&apos;où vient ce chiffre ?
+        </summary>
+        <div className="mt-3 space-y-1.5">
+          <BreakdownLine label="Solde compte de vie courante" value={data.availableBalance} />
+          <BreakdownLine label="+ Revenus encore à venir ce mois" value={data.remainingIncome} sign="+" />
+          <BreakdownLine label="− Charges fixes restantes" value={data.remainingFixed} sign="−" />
+          <BreakdownLine label="− Enveloppes restantes" value={data.variableRemaining} sign="−" />
+          <BreakdownLine label="− Épargne engagée (DCA/objectif)" value={data.committedSavings} sign="−" />
+          <BreakdownLine label="− Coussin réservé" value={data.bufferRemaining} sign="−" />
+          <div className="flex items-center justify-between border-t border-border pt-1.5 font-semibold">
+            <span>= Safe-to-Spend</span>
+            <span className="numeric tabular-nums">{formatEUR(data.safe.safeToSpend)}</span>
+          </div>
+          <p className="pt-1 text-[11px] text-muted-foreground">
+            Le solde dépend du « compte de vie courante » choisi dans Configurer. Si tes revenus
+            semblent doublés, vérifie tes sources dans Dépenses &amp; revenus.
+          </p>
+        </div>
+      </details>
+
       {/* Prévision Monte-Carlo de fin de mois */}
       <div className="mt-4 flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
         <CalendarRange className="size-3.5 shrink-0" />
@@ -251,6 +274,26 @@ function WeeklyRecap({ consumed, planned }: { consumed: number; planned: number 
         )}
       </p>
     </section>
+  );
+}
+
+function BreakdownLine({
+  label,
+  value,
+  sign,
+}: {
+  label: string;
+  value: number;
+  sign?: "+" | "−";
+}) {
+  return (
+    <div className="flex items-center justify-between text-muted-foreground">
+      <span>{label}</span>
+      <span className="numeric tabular-nums">
+        {sign === "−" ? "−" : ""}
+        {formatEUR(value)}
+      </span>
+    </div>
   );
 }
 
