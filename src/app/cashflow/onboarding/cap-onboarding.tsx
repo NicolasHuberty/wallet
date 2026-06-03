@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -18,9 +25,43 @@ import {
 import { formatEUR } from "@/lib/format";
 import { completeCapOnboarding } from "../actions";
 
+type FlowFreq = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 type Income = { label: string; amount: string; day: string; isVariable: boolean; floor: string };
-type Fixed = { label: string; category: string; amount: string; day: string; active: boolean };
+type Fixed = {
+  label: string;
+  category: string;
+  amount: string;
+  frequency: FlowFreq;
+  date: string; // ISO yyyy-mm-dd : prochaine échéance
+  active: boolean;
+};
 type Envelope = { label: string; category: string; amount: string };
+
+const FREQ_LABEL: Record<FlowFreq, string> = {
+  weekly: "Hebdo",
+  biweekly: "Quinzaine",
+  monthly: "Mensuel",
+  quarterly: "Trimestriel",
+  yearly: "Annuel",
+};
+
+/** Ramène un montant à son équivalent mensuel selon la fréquence. */
+function monthlyize(amount: number, freq: FlowFreq): number {
+  switch (freq) {
+    case "weekly":
+      return (amount * 52) / 12;
+    case "biweekly":
+      return (amount * 26) / 12;
+    case "quarterly":
+      return amount / 3;
+    case "yearly":
+      return amount / 12;
+    default:
+      return amount;
+  }
+}
+
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 const FIXED_PRESETS: { label: string; category: string }[] = [
   { label: "Loyer / crédit", category: "housing" },
@@ -82,7 +123,10 @@ export function CapOnboarding() {
     [incomes],
   );
   const totalFixed = useMemo(
-    () => fixed.filter((f) => f.active).reduce((s, f) => s + (Number(f.amount) || 0), 0),
+    () =>
+      fixed
+        .filter((f) => f.active)
+        .reduce((s, f) => s + monthlyize(Number(f.amount) || 0, f.frequency), 0),
     [fixed],
   );
   const totalVariable = useMemo(
@@ -102,7 +146,17 @@ export function CapOnboarding() {
     setFixed((prev) => {
       const i = prev.findIndex((f) => f.label === preset.label);
       if (i >= 0) return prev.filter((_, idx) => idx !== i);
-      return [...prev, { label: preset.label, category: preset.category, amount: "", day: "1", active: true }];
+      return [
+        ...prev,
+        {
+          label: preset.label,
+          category: preset.category,
+          amount: "",
+          frequency: "monthly",
+          date: TODAY_ISO,
+          active: true,
+        },
+      ];
     });
   }
 
@@ -132,7 +186,8 @@ export function CapOnboarding() {
               label: f.label,
               amount: Number(f.amount),
               category: f.category,
-              dayOfMonth: f.day === "" ? null : Number(f.day),
+              frequency: f.frequency,
+              firstDate: f.date || null,
             })),
           envelopes: envelopes
             .filter((e) => e.label.trim() && Number(e.amount) > 0)
@@ -279,26 +334,42 @@ export function CapOnboarding() {
           {fixed.length > 0 && (
             <div className="space-y-2">
               {fixed.map((f, i) => (
-                <div key={f.label} className="grid grid-cols-[1.4fr_1fr_0.8fr] items-end gap-2 rounded-lg border border-border bg-card p-3">
+                <div key={f.label} className="rounded-lg border border-border bg-card p-3">
                   <div className="text-sm font-medium">{f.label}</div>
-                  <Field label="Montant">
-                    <MoneyInput value={f.amount} onChange={(v) => setFixed((p) => p.map((x, idx) => (idx === i ? { ...x, amount: v } : x)))} />
-                  </Field>
-                  <Field label="Jour">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={f.day}
-                      onChange={(e) => setFixed((p) => p.map((x, idx) => (idx === i ? { ...x, day: e.target.value } : x)))}
-                      className="h-11"
-                    />
-                  </Field>
+                  <div className="mt-2 grid gap-2 md:grid-cols-3">
+                    <Field label="Montant">
+                      <MoneyInput value={f.amount} onChange={(v) => setFixed((p) => p.map((x, idx) => (idx === i ? { ...x, amount: v } : x)))} />
+                    </Field>
+                    <Field label="Récurrence">
+                      <Select
+                        value={f.frequency}
+                        onValueChange={(v) => setFixed((p) => p.map((x, idx) => (idx === i ? { ...x, frequency: v as FlowFreq } : x)))}
+                      >
+                        <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(FREQ_LABEL) as FlowFreq[]).map((k) => (
+                            <SelectItem key={k} value={k}>{FREQ_LABEL[k]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Prochaine échéance">
+                      <Input
+                        type="date"
+                        value={f.date}
+                        onChange={(e) => setFixed((p) => p.map((x, idx) => (idx === i ? { ...x, date: e.target.value } : x)))}
+                        className="h-11"
+                      />
+                    </Field>
+                  </div>
                 </div>
               ))}
             </div>
           )}
-          <Running label="Fixes" value={totalFixed} />
+          <p className="text-[11px] text-muted-foreground">
+            Total ramené au mois (le trimestriel/annuel est lissé pour le calcul).
+          </p>
+          <Running label="Fixes (équiv. /mois)" value={totalFixed} />
         </Chapter>
       )}
 

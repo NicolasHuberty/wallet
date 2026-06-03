@@ -11,6 +11,7 @@ import {
   rolloverPolicy,
   savingsTargetMode,
   profileComposition,
+  flowFrequency,
 } from "@/db/schema";
 import {
   getCashflowDashboard,
@@ -348,7 +349,10 @@ const capOnboardingSchema = z.object({
         label: z.string().min(1),
         amount: z.coerce.number().min(0),
         category: z.string().default("subscriptions"),
-        dayOfMonth: z.coerce.number().int().min(1).max(31).nullable().optional(),
+        frequency: z.enum(flowFrequency).default("monthly"),
+        // Date de la prochaine/première échéance (ISO yyyy-mm-dd). Sert d'ancre
+        // pour la récurrence et fixe le jour du mois.
+        firstDate: z.string().optional().nullable(),
       }),
     )
     .default([]),
@@ -416,18 +420,19 @@ export async function completeCapOnboarding(values: z.infer<typeof capOnboarding
     });
   }
 
-  // Fixes datés.
+  // Fixes datés (échéancier : récurrence + ancre choisies par l'utilisateur).
   for (const e of p.fixedExpenses) {
     if (e.amount <= 0) continue;
+    const anchor = e.firstDate ? new Date(e.firstDate) : now;
     await db.insert(schema.recurringExpense).values({
       householdId: h.id,
       label: e.label,
       category: e.category,
       amount: e.amount,
       ownership: "shared",
-      startDate: now,
-      dayOfMonth: e.dayOfMonth ?? null,
-      frequency: "monthly",
+      startDate: anchor,
+      dayOfMonth: e.firstDate ? anchor.getUTCDate() : null,
+      frequency: e.frequency,
       flowType: "fixed",
       active: true,
       autoConfirm: true,
