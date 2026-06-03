@@ -10,7 +10,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Search, X, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, X, TrendingUp, TrendingDown, FolderPlus } from "lucide-react";
+import { PosteDialog } from "@/components/poste-dialog";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -314,9 +315,25 @@ export function SpendingExplorer({
                       </span>
                     </span>
                   </div>
-                  <span className="numeric shrink-0 tabular-nums font-medium text-destructive">
-                    {formatEUR(Math.abs(r.amount))}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="numeric tabular-nums font-medium text-destructive">
+                      {formatEUR(Math.abs(r.amount))}
+                    </span>
+                    <PosteDialog
+                      defaultKind="variable"
+                      initialLabel={(r.notes ?? "").split(/\s+[-—]\s+/)[0]?.trim().slice(0, 40) || "Poste"}
+                      initialAmount={Math.abs(r.amount)}
+                      trigger={
+                        <button
+                          type="button"
+                          title="Créer un poste / une enveloppe à partir de cette transaction"
+                          className="rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                        >
+                          <FolderPlus className="size-3.5" />
+                        </button>
+                      }
+                    />
+                  </div>
                 </li>
               );
             })}
