@@ -15,13 +15,18 @@ import {
 import { toast } from "sonner";
 import { Plus, Trash2, Save } from "lucide-react";
 import { formatEUR } from "@/lib/format";
+import { accountKindLabel } from "@/lib/labels";
 import {
   saveFinancialProfile,
   saveEnvelope,
   deleteEnvelope,
+  saveFixedCharge,
+  deleteFixedCharge,
 } from "../actions";
 import type {
+  AccountKind,
   EnvelopeCadence,
+  FlowFrequency,
   RolloverPolicy,
   SavingsTargetMode,
 } from "@/db/schema";
@@ -31,6 +36,18 @@ export type ProfileData = {
   savingsTargetMode: SavingsTargetMode;
   savingsTargetAmount: number | null;
   defaultRolloverPolicy: RolloverPolicy;
+  spendingAccountId: string | null;
+};
+
+export type AccountOption = { id: string; name: string; kind: AccountKind };
+
+export type FixedChargeData = {
+  id: string;
+  label: string;
+  category: string;
+  amount: number;
+  frequency: FlowFrequency;
+  firstDate: string; // ISO yyyy-mm-dd
 };
 
 export type EnvelopeData = {
@@ -56,25 +73,59 @@ const ROLLOVER_LABEL: Record<RolloverPolicy, string> = {
   reset: "Remis à zéro",
 };
 
+const FREQ_LABEL: Record<FlowFrequency, string> = {
+  weekly: "Hebdo",
+  biweekly: "Quinzaine",
+  monthly: "Mensuel",
+  quarterly: "Trimestriel",
+  yearly: "Annuel",
+};
+
+function monthlyize(amount: number, freq: FlowFrequency): number {
+  switch (freq) {
+    case "weekly":
+      return (amount * 52) / 12;
+    case "biweekly":
+      return (amount * 26) / 12;
+    case "quarterly":
+      return amount / 3;
+    case "yearly":
+      return amount / 12;
+    default:
+      return amount;
+  }
+}
+
 const inputCls = "h-9 text-sm";
 const moneyCls = "h-9 pr-7 text-right tabular-nums text-sm";
 
 export function SetupForm({
   profile,
   envelopes,
+  accounts,
+  fixedCharges,
 }: {
   profile: ProfileData;
   envelopes: EnvelopeData[];
+  accounts: AccountOption[];
+  fixedCharges: FixedChargeData[];
 }) {
   return (
     <div className="space-y-8">
-      <ProfileSection profile={profile} />
+      <ProfileSection profile={profile} accounts={accounts} />
+      <FixedChargesSection charges={fixedCharges} />
       <EnvelopesSection envelopes={envelopes} />
     </div>
   );
 }
 
-function ProfileSection({ profile }: { profile: ProfileData }) {
+function ProfileSection({
+  profile,
+  accounts,
+}: {
+  profile: ProfileData;
+  accounts: AccountOption[];
+}) {
   const router = useRouter();
   const [buffer, setBuffer] = useState(String(profile.bufferAmount || ""));
   const [mode, setMode] = useState<SavingsTargetMode>(profile.savingsTargetMode);
@@ -82,6 +133,9 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
     profile.savingsTargetAmount ? String(profile.savingsTargetAmount) : "",
   );
   const [rollover, setRollover] = useState<RolloverPolicy>(profile.defaultRolloverPolicy);
+  const [spendingAccount, setSpendingAccount] = useState<string>(
+    profile.spendingAccountId ?? "__all__",
+  );
   const [pending, start] = useTransition();
 
   function save() {
@@ -92,6 +146,7 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
           savingsTargetMode: mode,
           savingsTargetAmount: mode === "fixed" ? Number(targetAmount) || 0 : null,
           defaultRolloverPolicy: rollover,
+          spendingAccountId: spendingAccount === "__all__" ? null : spendingAccount,
         });
         toast.success("Profil enregistré");
         router.refresh();
@@ -177,6 +232,27 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
             </SelectContent>
           </Select>
         </div>
+
+        <div className="grid gap-1.5 md:col-span-2">
+          <Label className="text-[11px] text-muted-foreground">Compte de vie courante</Label>
+          <Select value={spendingAccount} onValueChange={(v) => setSpendingAccount(v ?? "__all__")}>
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Tous les comptes cash + épargne</SelectItem>
+              {accounts.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.name} · {accountKindLabel[a.kind]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">
+            Le Safe-to-Spend se calcule sur ce solde. Choisis ton compte courant pour exclure
+            ton épargne.
+          </p>
+        </div>
       </div>
 
       <div className="flex justify-end">
@@ -185,6 +261,155 @@ function ProfileSection({ profile }: { profile: ProfileData }) {
         </Button>
       </div>
     </section>
+  );
+}
+
+function FixedChargesSection({ charges }: { charges: FixedChargeData[] }) {
+  const monthlyTotal = charges.reduce((s, c) => s + monthlyize(c.amount, c.frequency), 0);
+  return (
+    <section className="space-y-3">
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Échéancier — charges fixes</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Loyer, assurances, abonnements… avec leur récurrence et leur date d&apos;échéance.
+          </p>
+        </div>
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {formatEUR(monthlyTotal)}/mois
+        </span>
+      </div>
+      <div className="space-y-2">
+        {charges.map((c) => (
+          <FixedChargeCard key={c.id} charge={c} />
+        ))}
+        <FixedChargeCard />
+      </div>
+    </section>
+  );
+}
+
+function FixedChargeCard({ charge }: { charge?: FixedChargeData }) {
+  const router = useRouter();
+  const isNew = !charge;
+  const [label, setLabel] = useState(charge?.label ?? "");
+  const [amount, setAmount] = useState(charge ? String(charge.amount) : "");
+  const [frequency, setFrequency] = useState<FlowFrequency>(charge?.frequency ?? "monthly");
+  const [date, setDate] = useState(charge?.firstDate ?? new Date().toISOString().slice(0, 10));
+  const [pending, start] = useTransition();
+
+  function save() {
+    if (!label.trim()) {
+      toast.error("Donne un nom à la charge.");
+      return;
+    }
+    start(async () => {
+      try {
+        await saveFixedCharge({
+          id: charge?.id,
+          label: label.trim(),
+          category: charge?.category ?? "subscriptions",
+          amount: Number(amount) || 0,
+          frequency,
+          firstDate: date || null,
+        });
+        toast.success(isNew ? "Charge ajoutée" : "Charge mise à jour");
+        if (isNew) {
+          setLabel("");
+          setAmount("");
+        }
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Erreur");
+      }
+    });
+  }
+
+  function remove() {
+    if (!charge) return;
+    start(async () => {
+      try {
+        await deleteFixedCharge({ id: charge.id });
+        toast.success("Charge supprimée");
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Erreur");
+      }
+    });
+  }
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        isNew ? "border-dashed border-border bg-muted/20" : "border-border bg-card"
+      }`}
+    >
+      <div className="grid items-end gap-3 md:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">
+            {isNew ? "Nouvelle charge" : "Nom"}
+          </Label>
+          <Input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Assurance auto, Loyer…"
+            className={inputCls}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Montant</Label>
+          <div className="relative">
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0"
+              className={moneyCls}
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-muted-foreground">
+              €
+            </span>
+          </div>
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Récurrence</Label>
+          <Select value={frequency} onValueChange={(v) => setFrequency(v as FlowFrequency)}>
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(FREQ_LABEL) as FlowFrequency[]).map((k) => (
+                <SelectItem key={k} value={k}>
+                  {FREQ_LABEL[k]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label className="text-[11px] text-muted-foreground">Prochaine échéance</Label>
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9" />
+        </div>
+        <div className="flex items-center gap-1">
+          <Button onClick={save} disabled={pending} size="icon" variant="outline" className="size-9">
+            {isNew ? <Plus className="size-4" /> : <Save className="size-4" />}
+          </Button>
+          {!isNew && (
+            <Button
+              onClick={remove}
+              disabled={pending}
+              size="icon"
+              variant="ghost"
+              className="size-9 text-destructive hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

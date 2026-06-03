@@ -1,17 +1,26 @@
 import Link from "next/link";
-import { getPrimaryHousehold } from "@/lib/queries";
-import { getFinancialProfile, getBudgetEnvelopes } from "@/lib/cashflow/data";
+import { getPrimaryHousehold, getAccounts } from "@/lib/queries";
+import { getFinancialProfile, getBudgetEnvelopes, getFixedCharges } from "@/lib/cashflow/data";
+import { isLiability } from "@/lib/labels";
 import { PageHeader } from "@/components/page-header";
 import { ArrowLeft, Sparkles, ArrowRight } from "lucide-react";
-import { SetupForm, type EnvelopeData, type ProfileData } from "./setup-form";
+import {
+  SetupForm,
+  type EnvelopeData,
+  type ProfileData,
+  type AccountOption,
+  type FixedChargeData,
+} from "./setup-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function CashflowSetupPage() {
   const h = await getPrimaryHousehold();
-  const [profileRow, envelopeRows] = await Promise.all([
+  const [profileRow, envelopeRows, accountRows, fixedRows] = await Promise.all([
     getFinancialProfile(h.id),
     getBudgetEnvelopes(h.id),
+    getAccounts(h.id),
+    getFixedCharges(h.id),
   ]);
 
   const profile: ProfileData = {
@@ -19,7 +28,23 @@ export default async function CashflowSetupPage() {
     savingsTargetMode: profileRow?.savingsTargetMode ?? "max",
     savingsTargetAmount: profileRow?.savingsTargetAmount ?? null,
     defaultRolloverPolicy: profileRow?.defaultRolloverPolicy ?? "to_savings",
+    spendingAccountId: profileRow?.spendingAccountId ?? null,
   };
+
+  const accounts: AccountOption[] = accountRows
+    .filter((a) => !a.archivedAt && !isLiability(a.kind))
+    .map((a) => ({ id: a.id, name: a.name, kind: a.kind }));
+
+  const fixedCharges: FixedChargeData[] = fixedRows
+    .map((f) => ({
+      id: f.id,
+      label: f.label,
+      category: f.category,
+      amount: f.amount,
+      frequency: f.frequency,
+      firstDate: (f.startDate as unknown as Date).toISOString().slice(0, 10),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   const envelopes: EnvelopeData[] = envelopeRows.map((e) => ({
     id: e.id,
@@ -65,7 +90,12 @@ export default async function CashflowSetupPage() {
             </div>
             <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
           </Link>
-          <SetupForm profile={profile} envelopes={envelopes} />
+          <SetupForm
+            profile={profile}
+            envelopes={envelopes}
+            accounts={accounts}
+            fixedCharges={fixedCharges}
+          />
         </div>
       </div>
     </>

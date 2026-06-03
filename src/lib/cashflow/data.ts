@@ -49,6 +49,15 @@ export async function getBudgetEnvelopes(householdId: string) {
     .where(eq(schema.budgetEnvelope.householdId, householdId));
 }
 
+/** Charges fixes datées du household (pour l'échéancier). */
+export async function getFixedCharges(householdId: string) {
+  const rows = await db
+    .select()
+    .from(schema.recurringExpense)
+    .where(eq(schema.recurringExpense.householdId, householdId));
+  return rows.filter((r) => r.flowType === "fixed");
+}
+
 /** Dépenses confirmées depuis le début du mois courant. */
 export async function getSpendEventsThisMonth(householdId: string, today: Date) {
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));

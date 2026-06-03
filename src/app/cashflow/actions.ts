@@ -113,6 +113,7 @@ const profileSchema = z.object({
   savingsTargetMode: z.enum(savingsTargetMode).default("max"),
   savingsTargetAmount: z.coerce.number().min(0).nullable().optional(),
   defaultRolloverPolicy: z.enum(rolloverPolicy).default("to_savings"),
+  spendingAccountId: z.string().nullable().optional(),
 });
 
 /** Crée ou met à jour le profil financier (coussin, objectif d'épargne). */
@@ -120,6 +121,17 @@ export async function saveFinancialProfile(values: z.infer<typeof profileSchema>
   assertWritable();
   const p = profileSchema.parse(values);
   const h = await getPrimaryHousehold();
+
+  // Vérifie que le compte de vie courante appartient bien au household.
+  let spendingAccountId: string | null = null;
+  if (p.spendingAccountId) {
+    const acc = await db
+      .select({ id: schema.account.id })
+      .from(schema.account)
+      .where(and(eq(schema.account.id, p.spendingAccountId), eq(schema.account.householdId, h.id)))
+      .limit(1);
+    spendingAccountId = acc[0]?.id ?? null;
+  }
 
   const existing = await db
     .select({ id: schema.financialProfile.id })
@@ -132,6 +144,7 @@ export async function saveFinancialProfile(values: z.infer<typeof profileSchema>
     savingsTargetMode: p.savingsTargetMode,
     savingsTargetAmount: p.savingsTargetMode === "fixed" ? p.savingsTargetAmount ?? 0 : null,
     defaultRolloverPolicy: p.defaultRolloverPolicy,
+    spendingAccountId,
     updatedAt: new Date(),
   };
 
@@ -204,6 +217,76 @@ export async function deleteEnvelope(values: z.infer<typeof deleteEnvelopeSchema
     );
   revalidatePath("/cashflow");
   revalidatePath("/cashflow/setup");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Échéancier : charges fixes datées (récurrence + date)
+// ──────────────────────────────────────────────────────────────────────
+
+const fixedChargeSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(1),
+  category: z.string().min(1).default("subscriptions"),
+  amount: z.coerce.number().min(0),
+  frequency: z.enum(flowFrequency).default("monthly"),
+  firstDate: z.string().optional().nullable(), // ISO yyyy-mm-dd
+});
+
+/** Crée ou met à jour une charge fixe datée (échéancier). */
+export async function saveFixedCharge(values: z.infer<typeof fixedChargeSchema>) {
+  assertWritable();
+  const p = fixedChargeSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const anchor = p.firstDate ? new Date(p.firstDate) : new Date();
+
+  const payload = {
+    label: p.label,
+    category: p.category,
+    amount: p.amount,
+    frequency: p.frequency,
+    flowType: "fixed" as const,
+    dayOfMonth: p.firstDate ? anchor.getUTCDate() : null,
+    startDate: anchor,
+    active: true,
+    autoConfirm: true,
+    updatedAt: new Date(),
+  };
+
+  if (p.id) {
+    await db
+      .update(schema.recurringExpense)
+      .set(payload)
+      .where(
+        and(
+          eq(schema.recurringExpense.id, p.id),
+          eq(schema.recurringExpense.householdId, h.id),
+        ),
+      );
+  } else {
+    await db
+      .insert(schema.recurringExpense)
+      .values({ householdId: h.id, ownership: "shared", ...payload });
+  }
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/setup");
+  revalidatePath("/expenses");
+}
+
+const deleteFixedChargeSchema = z.object({ id: z.string() });
+
+/** Supprime une charge fixe. */
+export async function deleteFixedCharge(values: z.infer<typeof deleteFixedChargeSchema>) {
+  assertWritable();
+  const p = deleteFixedChargeSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  await db
+    .delete(schema.recurringExpense)
+    .where(
+      and(eq(schema.recurringExpense.id, p.id), eq(schema.recurringExpense.householdId, h.id)),
+    );
+  revalidatePath("/cashflow");
+  revalidatePath("/cashflow/setup");
+  revalidatePath("/expenses");
 }
 
 // ──────────────────────────────────────────────────────────────────────
