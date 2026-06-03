@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getPrimaryHousehold } from "@/lib/queries";
 import { getFinancialProfile, getBudgetEnvelopes } from "@/lib/cashflow/data";
 import { PageHeader } from "@/components/page-header";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Sparkles, ArrowRight } from "lucide-react";
 import { SetupForm, type EnvelopeData, type ProfileData } from "./setup-form";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +46,25 @@ export default async function CashflowSetupPage() {
         }
       />
       <div className="p-4 md:p-8">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-3xl space-y-6">
+          <Link
+            href="/cashflow/onboarding"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-primary/5 p-4 transition-colors hover:bg-primary/10"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Sparkles className="size-5" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">Audit guidé</div>
+                <div className="text-xs text-muted-foreground">
+                  Laisse-toi guider en quelques minutes — calcule ta capacité d&apos;épargne et
+                  remplit tout d&apos;un coup.
+                </div>
+              </div>
+            </div>
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
           <SetupForm profile={profile} envelopes={envelopes} />
         </div>
       </div>
