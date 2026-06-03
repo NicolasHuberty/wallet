@@ -45,6 +45,11 @@ function categoryOf(r: AnalyticsCashflow): TransactionCategory {
   });
 }
 
+/** Catégorie résolue d'une transaction (champ pré-calculé, sinon classifieur). */
+export function resolveCategory(r: AnalyticsCashflow): TransactionCategory {
+  return categoryOf(r);
+}
+
 function toDate(d: Date | string): Date {
   return d instanceof Date ? d : new Date(d);
 }
@@ -462,4 +467,82 @@ export function dailySpendSeries(rows: AnalyticsCashflow[]): DailySpend[] {
   return Array.from(map.entries())
     .map(([date, spend]) => ({ date, spend }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ─── Explorateur de dépenses (global, transversal) ───────────────────
+
+/** Minuscule + sans accents — pour la recherche libre. */
+function normSearch(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+/** Filtre par texte libre sur la description (insensible casse/accents).
+ *  Générique : préserve le type concret des lignes (id, compte, etc.). */
+export function searchCashflows<T extends AnalyticsCashflow>(rows: T[], query: string): T[] {
+  const q = normSearch(query.trim());
+  if (!q) return rows;
+  return rows.filter((r) => normSearch(r.notes ?? "").includes(q));
+}
+
+export type MonthlySpend = { month: string; spend: number; count: number };
+
+/** Dépense (valeur absolue) par mois — hors virements internes et entrées. */
+export function monthlyExpenseTotals(rows: AnalyticsCashflow[]): MonthlySpend[] {
+  const map = new Map<string, MonthlySpend>();
+  for (const r of rows) {
+    if (isInternalTransfer(r)) continue;
+    if (r.amount >= 0) continue;
+    const m = ym(r.date);
+    if (!map.has(m)) map.set(m, { month: m, spend: 0, count: 0 });
+    const row = map.get(m)!;
+    row.spend += Math.abs(r.amount);
+    row.count++;
+  }
+  return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+export type MonthlyShareRow = { month: string } & Partial<Record<TransactionCategory, number>>;
+
+/** Part (%) de chaque catégorie dans les DÉPENSES de chaque mois (somme ≈ 100). */
+export function monthlyCategoryShare(rows: AnalyticsCashflow[]): MonthlyShareRow[] {
+  const amounts = new Map<string, Map<TransactionCategory, number>>();
+  for (const r of rows) {
+    if (isInternalTransfer(r)) continue;
+    if (r.amount >= 0) continue;
+    const m = ym(r.date);
+    if (!amounts.has(m)) amounts.set(m, new Map());
+    const cm = amounts.get(m)!;
+    const cat = categoryOf(r);
+    cm.set(cat, (cm.get(cat) ?? 0) + Math.abs(r.amount));
+  }
+  const out: MonthlyShareRow[] = [];
+  for (const [month, cm] of amounts) {
+    const tot = Array.from(cm.values()).reduce((s, v) => s + v, 0);
+    const row: MonthlyShareRow = { month };
+    if (tot > 0) for (const [cat, v] of cm) row[cat] = (v / tot) * 100;
+    out.push(row);
+  }
+  return out.sort((a, b) => a.month.localeCompare(b.month));
+}
+
+export type SpendComparison = {
+  currentMonth: string;
+  current: number;
+  /** Moyenne des mois COMPLETS précédents (exclut le mois courant partiel). */
+  average: number;
+  deltaPct: number | null;
+  monthsCount: number;
+};
+
+/** Compare la dépense du mois courant à la moyenne des mois précédents complets. */
+export function currentVsAverageSpend(
+  rows: AnalyticsCashflow[],
+  currentMonth: string,
+): SpendComparison {
+  const monthly = monthlyExpenseTotals(rows);
+  const current = monthly.find((m) => m.month === currentMonth)?.spend ?? 0;
+  const past = monthly.filter((m) => m.month < currentMonth);
+  const average = past.length > 0 ? past.reduce((s, m) => s + m.spend, 0) / past.length : 0;
+  const deltaPct = average > 0 ? ((current - average) / average) * 100 : null;
+  return { currentMonth, current, average, deltaPct, monthsCount: past.length };
 }

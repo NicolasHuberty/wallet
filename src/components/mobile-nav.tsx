@@ -22,6 +22,7 @@ import {
   Coins,
   Building2,
   Gauge,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +49,7 @@ const PRIMARY: NavItem[] = [
 
 const SECONDARY: NavItem[] = [
   { href: "/cashflow", label: "Cap — reste-à-vivre", icon: Gauge },
+  { href: "/insights", label: "Analyse des dépenses", icon: Search },
   { href: "/investments", label: "Investissements", icon: TrendingUp },
   { href: "/real-estate", label: "Immobilier", icon: Home },
   { href: "/charges", label: "Frais one-shot", icon: CircleDollarSign },
@@ -64,6 +66,7 @@ const TITLE_BY_SEGMENT: Record<string, string> = {
   accounts: "Comptes",
   "check-in": "Check-in mensuel",
   expenses: "Dépenses & revenus",
+  insights: "Analyse des dépenses",
   charges: "Frais one-shot",
   investments: "Investissements",
   "real-estate": "Immobilier",

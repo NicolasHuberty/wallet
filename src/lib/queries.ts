@@ -224,6 +224,29 @@ export async function getAccountCashflows(accountId: string) {
     .orderBy(asc(schema.accountCashflow.date));
 }
 
+/** Toutes les transactions du household (tous comptes) + infos du compte —
+ *  base de l'explorateur de dépenses transversal. */
+export async function getHouseholdCashflows(householdId: string) {
+  return db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      accountName: schema.account.name,
+      accountKind: schema.account.kind,
+      date: schema.accountCashflow.date,
+      amount: schema.accountCashflow.amount,
+      notes: schema.accountCashflow.notes,
+      kind: schema.accountCashflow.kind,
+      category: schema.accountCashflow.category,
+      categorySource: schema.accountCashflow.categorySource,
+      transferToAccountId: schema.accountCashflow.transferToAccountId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.account.householdId, householdId))
+    .orderBy(asc(schema.accountCashflow.date));
+}
+
 // Amortization rows for all mortgages of a household, dated AFTER `since`.
 // Returned grouped by accountId (the loan account, not the mortgage id).
 // Used by the projection simulator so loans decay along the real schedule.

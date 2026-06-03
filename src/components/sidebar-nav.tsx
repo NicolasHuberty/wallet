@@ -16,6 +16,7 @@ import {
   ClipboardCheck,
   Building2,
   Gauge,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,7 @@ const items = [
   { href: "/investments", label: "Investissements", icon: TrendingUp },
   { href: "/real-estate", label: "Immobilier", icon: Home },
   { href: "/expenses", label: "Dépenses & revenus", icon: Receipt },
+  { href: "/insights", label: "Analyse", icon: Search },
   { href: "/charges", label: "Frais one-shot", icon: CircleDollarSign },
   { href: "/projections", label: "Projections", icon: LineChart },
   { href: "/banking", label: "Banques", icon: Building2 },
