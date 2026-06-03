@@ -51,7 +51,7 @@ describe("computeSafeToSpend", () => {
     expect(r.color).toBe("red");
   });
 
-  it("intègre les revenus restants à venir", () => {
+  it("n'ajoute PAS les revenus à venir au Safe-to-Spend (pas de double comptage)", () => {
     const r = computeSafeToSpend({
       availableBalance: 100,
       remainingIncome: 2000,
@@ -62,7 +62,10 @@ describe("computeSafeToSpend", () => {
       dayOfMonth: 10,
       daysInMonth: 30,
     });
-    expect(r.safeToSpend).toBe(100 + 2000 - 500 - 300 - 400);
+    // Safe = solde − fixes − variables − épargne − coussin (sans revenus à venir)
+    expect(r.safeToSpend).toBe(100 - 500 - 300 - 400);
+    // … mais le solde projeté de fin de mois, lui, intègre les revenus à venir.
+    expect(r.projectedEndBalance).toBe(100 + 2000 - 500 - 300 - 400);
   });
 
   it("couleur fine via le pacing discrétionnaire", () => {

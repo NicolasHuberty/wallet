@@ -201,7 +201,6 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
         </summary>
         <div className="mt-3 space-y-1.5">
           <BreakdownLine label="Solde compte de vie courante" value={data.availableBalance} />
-          <BreakdownLine label="+ Revenus encore à venir ce mois" value={data.remainingIncome} sign="+" />
           <BreakdownLine label="− Charges fixes restantes" value={data.remainingFixed} sign="−" />
           <BreakdownLine label="− Enveloppes restantes" value={data.variableRemaining} sign="−" />
           <BreakdownLine label="− Épargne engagée (DCA/objectif)" value={data.committedSavings} sign="−" />
@@ -211,8 +210,10 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
             <span className="numeric tabular-nums">{formatEUR(data.safe.safeToSpend)}</span>
           </div>
           <p className="pt-1 text-[11px] text-muted-foreground">
-            Le solde dépend du « compte de vie courante » choisi dans Configurer. Si tes revenus
-            semblent doublés, vérifie tes sources dans Dépenses &amp; revenus.
+            Tu dépenses depuis ton solde actuel. Tes revenus encore à venir ce mois (
+            {formatEUR(data.remainingIncome)}) ne sont pas ajoutés ici : quand ils tombent, ils
+            remplissent ton solde — les compter en plus reviendrait à compter ton salaire deux
+            fois. Solde de fin de mois projeté : {formatEUR(data.safe.projectedEndBalance)}.
           </p>
         </div>
       </details>

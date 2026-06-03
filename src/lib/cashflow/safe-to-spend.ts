@@ -59,9 +59,12 @@ export type SafeToSpendResult = {
 export function computeSafeToSpend(input: SafeToSpendInput): SafeToSpendResult {
   const daysRemaining = Math.max(1, input.daysInMonth - input.dayOfMonth + 1);
 
+  // On dépense depuis ce qu'on a DÉJÀ (le solde). Les revenus encore à venir
+  // ne s'ajoutent pas : quand ils tombent, ils remplissent simplement le solde.
+  // Les ajouter reviendrait à compter le salaire deux fois (il est déjà sur le
+  // compte + il « arrive »).
   const safeToSpend =
-    input.availableBalance +
-    input.remainingIncome -
+    input.availableBalance -
     input.remainingFixed -
     input.variableRemaining -
     input.committedSavings -
@@ -69,8 +72,9 @@ export function computeSafeToSpend(input: SafeToSpendInput): SafeToSpendResult {
 
   const budgetPerDay = Math.max(0, safeToSpend) / daysRemaining;
 
-  // Le coussin non dépensé reste sur le compte : on ne le soustrait pas du
-  // solde de fin de mois projeté.
+  // Le solde de fin de mois projeté, lui, intègre les revenus à venir (c'est
+  // une projection de ce que sera le compte à la fin du mois). Le coussin non
+  // dépensé reste sur le compte → non soustrait ici.
   const projectedEndBalance =
     input.availableBalance +
     input.remainingIncome -

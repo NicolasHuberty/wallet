@@ -89,12 +89,12 @@ describe("assembleDashboard", () => {
   it("ne compte dans remainingFixed que les fixes après le jour courant", () => {
     // Loyer le 1 (passé), Spotify le 20 (à venir) → seul Spotify reste
     const d = assembleDashboard(baseInput());
-    // Safe = 1500 + 0 (pas de revenu après le 16 ? salaire le 28 → +2600)
-    //      - 11 (spotify) - variableRemaining - 0 - bufferRemaining
+    // Safe = solde 1500 − 11 (spotify) − variableRemaining − coussin
     // variableRemaining = (360-72) + (120-40) = 288 + 80 = 368
-    // bufferRemaining = 100
-    // remainingIncome = 2600 (salaire le 28 > 16)
-    expect(d.safe.safeToSpend).toBe(1500 + 2600 - 11 - 368 - 0 - 100);
+    // bufferRemaining = 100 ; les revenus à venir ne sont PAS ajoutés.
+    expect(d.safe.safeToSpend).toBe(1500 - 11 - 368 - 100);
+    expect(d.remainingFixed).toBe(11);
+    expect(d.remainingIncome).toBe(2600);
   });
 
   it("construit la timeline triée des occurrences à venir", () => {
