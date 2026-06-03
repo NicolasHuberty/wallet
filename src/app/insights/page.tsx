@@ -12,6 +12,7 @@ export default async function InsightsPage() {
     id: r.id,
     accountId: r.accountId,
     accountName: r.accountName,
+    accountKind: r.accountKind,
     date: r.date as unknown as string,
     amount: r.amount,
     notes: r.notes,

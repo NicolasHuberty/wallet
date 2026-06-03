@@ -49,6 +49,17 @@ describe("monthlyExpenseTotals", () => {
   });
 });
 
+describe("exclusion des mouvements d'investissement", () => {
+  it("ignore les achats/ventes de titres (kind buy/sell) dans la dépense", () => {
+    const rows: AnalyticsCashflow[] = [
+      { date: "2026-01-10", amount: -50, notes: "courses", category: "food_groceries" },
+      { date: "2026-01-12", amount: -1134, notes: null, category: "other_expense", kind: "buy" },
+      { date: "2026-01-20", amount: 200, notes: null, category: null, kind: "sell" },
+    ];
+    expect(monthlyExpenseTotals(rows)).toEqual([{ month: "2026-01", spend: 50, count: 1 }]);
+  });
+});
+
 describe("monthlyCategoryShare", () => {
   it("calcule la part (%) de chaque catégorie dans les dépenses du mois", () => {
     const rows = [

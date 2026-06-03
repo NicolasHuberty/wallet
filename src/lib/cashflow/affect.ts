@@ -62,6 +62,7 @@ const TX_TO_ENVELOPE_CATEGORY: Record<TransactionCategory, string | null> = {
   food_groceries: "food",
   food_restaurant: "food",
   transport: "transport",
+  fuel: "transport",
   subscriptions: "subscriptions",
   health: "health",
   leisure: "leisure",

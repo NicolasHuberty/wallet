@@ -32,6 +32,7 @@ export type ExplorerRow = {
   id: string;
   accountId: string;
   accountName: string;
+  accountKind: string;
   date: string;
   amount: number;
   notes: string | null;
@@ -41,6 +42,9 @@ export type ExplorerRow = {
 };
 
 export type AccountOption = { id: string; name: string; kind: string };
+
+// Comptes dont les mouvements ne sont pas de la « dépense de vie ».
+const INVESTMENT_KINDS = new Set(["brokerage", "retirement", "crypto"]);
 
 const fmtMonth = (yyyymm: string) => {
   const [y, m] = yyyymm.split("-");
@@ -61,11 +65,15 @@ export function SpendingExplorer({
   const [category, setCategory] = useState<TransactionCategory | null>(null);
   const [accountId, setAccountId] = useState<string>("all");
 
-  // Portée compte
-  const base = useMemo(
-    () => (accountId === "all" ? rows : rows.filter((r) => r.accountId === accountId)),
-    [rows, accountId],
-  );
+  // Portée compte. Sur « Tous les comptes », on EXCLUT les comptes
+  // d'investissement (brokerage/pension/crypto) : leurs achats de titres ne
+  // sont pas des dépenses de vie et écraseraient l'analyse.
+  const base = useMemo(() => {
+    if (accountId === "all") {
+      return rows.filter((r) => !INVESTMENT_KINDS.has(r.accountKind));
+    }
+    return rows.filter((r) => r.accountId === accountId);
+  }, [rows, accountId]);
 
   // Mois de référence = dernier mois avec des dépenses dans la portée.
   const latestMonth = useMemo(() => {

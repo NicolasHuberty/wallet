@@ -90,6 +90,13 @@ function isInternalTransfer(r: AnalyticsCashflow): boolean {
   );
 }
 
+// Une ligne qui n'est PAS de la dépense de consommation : virement interne OU
+// mouvement d'investissement (achat/vente de titres). Les achats de titres
+// (`buy`, montant négatif) ne sont pas une dépense — sinon ils écrasent l'analyse.
+function isNonSpending(r: AnalyticsCashflow): boolean {
+  return isInternalTransfer(r) || r.kind === "buy" || r.kind === "sell";
+}
+
 export function buildKpis(rows: AnalyticsCashflow[]): AnalyticsKpis {
   if (rows.length === 0) {
     return {
@@ -175,7 +182,7 @@ export function spendingByCategory(rows: AnalyticsCashflow[]): {
   const buckets: Record<TransactionCategory, { total: number; count: number }> = Object
     .fromEntries(transactionCategory.map((c) => [c, { total: 0, count: 0 }])) as never;
   for (const r of rows) {
-    if (isInternalTransfer(r)) continue; // not real spending — show separately
+    if (isNonSpending(r)) continue; // not real spending — show separately
     const cat = categoryOf(r);
     buckets[cat].total += r.amount;
     buckets[cat].count++;
@@ -206,7 +213,7 @@ export type MonthlyCategoryRow = {
 export function monthlyByCategory(rows: AnalyticsCashflow[]): MonthlyCategoryRow[] {
   const map = new Map<string, MonthlyCategoryRow>();
   for (const r of rows) {
-    if (isInternalTransfer(r)) continue; // exclude internal transfers
+    if (isNonSpending(r)) continue; // exclude internal transfers
     const m = ym(r.date);
     if (!map.has(m)) map.set(m, { month: m, total: 0 });
     const row = map.get(m)!;
@@ -490,7 +497,7 @@ export type MonthlySpend = { month: string; spend: number; count: number };
 export function monthlyExpenseTotals(rows: AnalyticsCashflow[]): MonthlySpend[] {
   const map = new Map<string, MonthlySpend>();
   for (const r of rows) {
-    if (isInternalTransfer(r)) continue;
+    if (isNonSpending(r)) continue;
     if (r.amount >= 0) continue;
     const m = ym(r.date);
     if (!map.has(m)) map.set(m, { month: m, spend: 0, count: 0 });
@@ -507,7 +514,7 @@ export type MonthlyShareRow = { month: string } & Partial<Record<TransactionCate
 export function monthlyCategoryShare(rows: AnalyticsCashflow[]): MonthlyShareRow[] {
   const amounts = new Map<string, Map<TransactionCategory, number>>();
   for (const r of rows) {
-    if (isInternalTransfer(r)) continue;
+    if (isNonSpending(r)) continue;
     if (r.amount >= 0) continue;
     const m = ym(r.date);
     if (!amounts.has(m)) amounts.set(m, new Map());

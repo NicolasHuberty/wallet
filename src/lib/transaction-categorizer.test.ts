@@ -22,12 +22,25 @@ describe("classifyTransaction", () => {
     expect(classifyTransaction({ amount: -12, notes: "PIZZA HUT" })).toBe("food_restaurant");
   });
 
+  it("recognises fuel stations as Essence (not transport)", () => {
+    expect(classifyTransaction({ amount: -62, notes: "8029 Dats Gembloux" })).toBe("fuel");
+    expect(classifyTransaction({ amount: -55, notes: "Shell 7037 Les Isn" })).toBe("fuel");
+    expect(classifyTransaction({ amount: -53, notes: "Esso Gembloux" })).toBe("fuel");
+    expect(classifyTransaction({ amount: -26, notes: "Total Nb004441 Eghezee" })).toBe("fuel");
+    expect(classifyTransaction({ amount: -40, notes: "Q8 Wavre" })).toBe("fuel");
+  });
+
+  it("keeps public transport / parking as transport", () => {
+    expect(classifyTransaction({ amount: -2.6, notes: "SNCB NMBS" })).toBe("transport");
+    expect(classifyTransaction({ amount: -6, notes: "Namur Parking Voirie" })).toBe("transport");
+  });
+
   it("recognises transport", () => {
     expect(classifyTransaction({ amount: -49, notes: "STIB-MIVB Brussels" })).toBe(
       "transport",
     );
     expect(classifyTransaction({ amount: -56, notes: "SNCB" })).toBe("transport");
-    expect(classifyTransaction({ amount: -78, notes: "Q8 station" })).toBe("transport");
+    expect(classifyTransaction({ amount: -78, notes: "Q8 station" })).toBe("fuel");
     expect(classifyTransaction({ amount: -3.5, notes: "Interparking Bruxelles" })).toBe(
       "transport",
     );

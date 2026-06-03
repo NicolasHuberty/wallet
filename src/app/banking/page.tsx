@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { getPrimaryHousehold, getAccounts, getBankConnections } from "@/lib/queries";
 import { isConfigured } from "@/lib/gocardless";
 import { BankingDashboard } from "./banking-dashboard";
+import { ResetClassificationsButton } from "./reset-classifications-button";
 
 export default async function BankingPage({
   searchParams,
@@ -46,6 +47,7 @@ export default async function BankingPage({
           connectedConnectionId={sp.connected ?? null}
           error={sp.error ?? null}
         />
+        {accounts.length > 0 && <ResetClassificationsButton />}
       </div>
     </>
   );

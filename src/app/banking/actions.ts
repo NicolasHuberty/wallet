@@ -570,6 +570,51 @@ export async function recategorizeAccount(
   return { updated: target.length, bceMatches, ruleMatches };
 }
 
+// ─── Reset complet des classifications du household ──────────────────
+// Repart de zéro : vide catégorie + source + liens sur toutes les
+// transactions du household ET supprime toutes les règles de contrepartie.
+// Déclenché manuellement par l'utilisateur (zone danger). Après reset, il
+// relance « Recatégoriser » par compte → cascade propre via le moteur amélioré.
+export async function resetClassifications(): Promise<{
+  cleared: number;
+  rulesDeleted: number;
+}> {
+  assertWritable();
+  const h = await getPrimaryHousehold();
+
+  const accounts = await db
+    .select({ id: schema.account.id })
+    .from(schema.account)
+    .where(eq(schema.account.householdId, h.id));
+  const accountIds = accounts.map((a) => a.id);
+
+  let cleared = 0;
+  if (accountIds.length > 0) {
+    const res = await db
+      .update(schema.accountCashflow)
+      .set({
+        category: null,
+        categorySource: null,
+        bceEnterpriseNumber: null,
+        transferToAccountId: null,
+        linkedOneOffChargeId: null,
+        linkedRecurringIncomeId: null,
+        updatedAt: new Date(),
+      })
+      .where(inArray(schema.accountCashflow.accountId, accountIds))
+      .returning({ id: schema.accountCashflow.id });
+    cleared = res.length;
+  }
+
+  const deleted = await db
+    .delete(schema.categoryRule)
+    .where(eq(schema.categoryRule.householdId, h.id))
+    .returning({ id: schema.categoryRule.id });
+
+  revalidatePath("/banking");
+  return { cleared, rulesDeleted: deleted.length };
+}
+
 // ─── Manual override of a single cashflow's category ─────────────────
 // First step of the user-feedback loop. Sets categorySource = 'user' so
 // future re-categorizations / re-syncs leave it alone.
