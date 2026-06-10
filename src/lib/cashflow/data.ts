@@ -11,6 +11,9 @@ import {
 import { deriveSpendEvents } from "./affect";
 import { transactionCategory, type TransactionCategory } from "@/lib/transaction-categorizer";
 import { computeRollover, type RolloverResult } from "./rollover";
+import type { EnvelopeView } from "./assemble";
+import { buildMonthTransactions, type MonthTransaction } from "./month-expenses";
+import { monthlyExpenseTotals, type MonthlySpend } from "@/lib/account-analytics";
 
 /**
  * Cash-flow ("Cap") — couche données serveur. Fetch les rows du household et
@@ -344,6 +347,244 @@ export async function getMonthOverview(
   );
 
   return { month, cycle: cycleRows[0] ?? null, dashboard, envelopeLines, rolloverPreview };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Vue « Dépenses du mois » — toutes les dépenses des comptes courants,
+// rapprochées d'un type et d'une enveloppe + suivi jour/semaine/mois.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Parse un `YYYY-MM` (ou maintenant) en repères de mois UTC. */
+function parseMonth(month?: string): { year: number; month0: number; monthStr: string } {
+  let year: number;
+  let month0: number;
+  const m = month?.match(/^(\d{4})-(\d{2})$/);
+  if (m) {
+    year = Number(m[1]);
+    month0 = Number(m[2]) - 1;
+  } else {
+    const now = new Date();
+    year = now.getUTCFullYear();
+    month0 = now.getUTCMonth();
+  }
+  return { year, month0, monthStr: `${year}-${String(month0 + 1).padStart(2, "0")}` };
+}
+
+/** Comptes « courants » du household : tous les comptes cash (repli vie courante). */
+function resolveCurrentAccounts(
+  accounts: Awaited<ReturnType<typeof getAccounts>>,
+  profile: Awaited<ReturnType<typeof getFinancialProfile>>,
+): { id: string; name: string }[] {
+  const cash = accounts.filter((a) => a.kind === "cash");
+  if (cash.length > 0) return cash.map((a) => ({ id: a.id, name: a.name }));
+  const fallback = resolveSpendingAccounts(accounts, profile?.spendingAccountId);
+  return accounts
+    .filter((a) => fallback.ids.includes(a.id))
+    .map((a) => ({ id: a.id, name: a.name }));
+}
+
+/** Transactions bancaires d'un mois donné pour une liste de comptes. */
+async function getBankExpensesForMonth(accountIds: string[], year: number, month0: number) {
+  if (accountIds.length === 0) return [];
+  const start = new Date(Date.UTC(year, month0, 1));
+  const end = new Date(Date.UTC(year, month0 + 1, 1));
+  return db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      accountName: schema.account.name,
+      date: schema.accountCashflow.date,
+      amount: schema.accountCashflow.amount,
+      notes: schema.accountCashflow.notes,
+      category: schema.accountCashflow.category,
+      kind: schema.accountCashflow.kind,
+      transferToAccountId: schema.accountCashflow.transferToAccountId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(
+      and(
+        inArray(schema.accountCashflow.accountId, accountIds),
+        gte(schema.accountCashflow.date, start),
+        lt(schema.accountCashflow.date, end),
+      ),
+    );
+}
+
+/** Dépenses manuelles d'un mois donné. */
+async function getSpendEventsForMonth(householdId: string, year: number, month0: number) {
+  const start = new Date(Date.UTC(year, month0, 1));
+  const end = new Date(Date.UTC(year, month0 + 1, 1));
+  return db
+    .select()
+    .from(schema.spendEvent)
+    .where(
+      and(
+        eq(schema.spendEvent.householdId, householdId),
+        gte(schema.spendEvent.date, start),
+        lt(schema.spendEvent.date, end),
+      ),
+    );
+}
+
+/** Total mensuel de dépense (18 derniers mois) sur les comptes courants. */
+async function getCurrentAccountsMonthlyTotals(
+  accountIds: string[],
+  year: number,
+  month0: number,
+): Promise<MonthlySpend[]> {
+  if (accountIds.length === 0) return [];
+  const start = new Date(Date.UTC(year, month0 - 17, 1));
+  const end = new Date(Date.UTC(year, month0 + 1, 1));
+  const rows = await db
+    .select({
+      date: schema.accountCashflow.date,
+      amount: schema.accountCashflow.amount,
+      notes: schema.accountCashflow.notes,
+      category: schema.accountCashflow.category,
+      kind: schema.accountCashflow.kind,
+      transferToAccountId: schema.accountCashflow.transferToAccountId,
+    })
+    .from(schema.accountCashflow)
+    .where(
+      and(
+        inArray(schema.accountCashflow.accountId, accountIds),
+        gte(schema.accountCashflow.date, start),
+        lt(schema.accountCashflow.date, end),
+      ),
+    );
+  return monthlyExpenseTotals(
+    rows.map((r) => ({
+      date: r.date,
+      amount: r.amount,
+      notes: r.notes,
+      category: r.category as TransactionCategory | null,
+      kind: r.kind,
+      transferToAccountId: r.transferToAccountId,
+    })),
+  );
+}
+
+export type MonthExpenseEnvelopeOption = { id: string; label: string; category: string };
+
+export type MonthExpensesData = {
+  month: string;
+  transactions: MonthTransaction[];
+  monthlyTotals: MonthlySpend[];
+  envelopes: MonthExpenseEnvelopeOption[];
+  accounts: { id: string; name: string }[];
+  total: number;
+  unaffectedCount: number;
+};
+
+/** Vue « Dépenses du mois » : toutes les dépenses des comptes courants, rapprochées. */
+export async function getMonthExpenses(
+  householdId: string,
+  month?: string,
+): Promise<MonthExpensesData> {
+  const { year, month0, monthStr } = parseMonth(month);
+  const [profile, envelopes, accounts, expensesRaw, mortgages] = await Promise.all([
+    getFinancialProfile(householdId),
+    getBudgetEnvelopes(householdId),
+    getAccounts(householdId),
+    db
+      .select()
+      .from(schema.recurringExpense)
+      .where(eq(schema.recurringExpense.householdId, householdId)),
+    getActiveMortgages(householdId),
+  ]);
+
+  const currentAccounts = resolveCurrentAccounts(accounts, profile);
+  const accountIds = currentAccounts.map((a) => a.id);
+
+  const [bankRows, manualRows, monthlyTotals] = await Promise.all([
+    getBankExpensesForMonth(accountIds, year, month0),
+    getSpendEventsForMonth(householdId, year, month0),
+    getCurrentAccountsMonthlyTotals(accountIds, year, month0),
+  ]);
+
+  const affectEnvelopes = envelopes.map((e) => ({
+    id: e.id,
+    label: e.label,
+    category: e.category,
+    active: e.active,
+    txCategories: parseTxCategories(e.txCategories),
+    counterpartyPatterns: parseStringArray(e.counterpartyPatterns),
+  }));
+
+  const activeFixed = expensesRaw.filter((e) => e.flowType === "fixed" && e.active);
+  const fixedCategories = new Set<string>(activeFixed.map((e) => e.category));
+  if (mortgages.length > 0) fixedCategories.add("housing");
+  const fixedPatterns = activeFixed.flatMap((e) => parseStringArray(e.counterpartyPatterns));
+
+  const envelopeMeta: Record<string, { label: string; category: string }> = {};
+  for (const e of envelopes) envelopeMeta[e.id] = { label: e.label, category: e.category };
+
+  const transactions = buildMonthTransactions({
+    bank: bankRows.map((r) => ({
+      id: r.id,
+      date: r.date,
+      amount: r.amount,
+      notes: r.notes,
+      category: r.category as TransactionCategory | null,
+      kind: r.kind,
+      transferToAccountId: r.transferToAccountId,
+      accountId: r.accountId,
+      accountName: r.accountName,
+    })),
+    manual: manualRows
+      .filter((s) => !s.linkedCashflowId)
+      .map((s) => ({
+        id: s.id,
+        date: s.date,
+        amount: s.amount,
+        envelopeId: s.envelopeId,
+        chargedToBuffer: s.chargedToBuffer,
+        label: s.label,
+      })),
+    envelopes: affectEnvelopes,
+    envelopeMeta,
+    fixedCategories,
+    fixedPatterns,
+  });
+
+  const total = transactions.reduce((s, t) => s + t.amount, 0);
+  const unaffectedCount = transactions.filter((t) => t.affectation === "buffer").length;
+
+  return {
+    month: monthStr,
+    transactions,
+    monthlyTotals,
+    envelopes: envelopes.map((e) => ({ id: e.id, label: e.label, category: e.category })),
+    accounts: currentAccounts,
+    total,
+    unaffectedCount,
+  };
+}
+
+export type EnvelopeMonthDetail = {
+  envelope: EnvelopeView | null;
+  transactions: MonthTransaction[];
+  month: string;
+  rolloverPolicy: string | null;
+};
+
+/** Détail d'une enveloppe sur le mois courant : pacing + transactions captées. */
+export async function getEnvelopeMonthDetail(
+  householdId: string,
+  envelopeId: string,
+  today: Date = new Date(),
+): Promise<EnvelopeMonthDetail> {
+  const monthStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
+  const [dashboard, expenses, envelopeRows] = await Promise.all([
+    getCashflowDashboard(householdId, today),
+    getMonthExpenses(householdId, monthStr),
+    getBudgetEnvelopes(householdId),
+  ]);
+  const envelope = dashboard.envelopes.find((e) => e.id === envelopeId) ?? null;
+  const transactions = expenses.transactions.filter((t) => t.envelopeId === envelopeId);
+  const rolloverPolicy = envelopeRows.find((e) => e.id === envelopeId)?.rolloverPolicy ?? null;
+  return { envelope, transactions, month: monthStr, rolloverPolicy };
 }
 
 /** True si le household a de quoi afficher un dashboard utile. */

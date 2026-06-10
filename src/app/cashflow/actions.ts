@@ -20,6 +20,9 @@ import {
 } from "@/lib/cashflow/data";
 import { computeRollover, type RolloverEnvelope } from "@/lib/cashflow/rollover";
 import { recomputeSnapshot } from "@/lib/snapshots";
+import { transactionCategory } from "@/lib/transaction-categorizer";
+import { merchantPattern } from "@/lib/cashflow/month-expenses";
+import { normalizeCounterparty } from "@/lib/counterparty-match";
 
 function currentMonth(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -102,6 +105,102 @@ export async function deleteSpend(values: z.infer<typeof deleteSpendSchema>) {
     .delete(schema.spendEvent)
     .where(and(eq(schema.spendEvent.id, p.id), eq(schema.spendEvent.householdId, h.id)));
   revalidatePath("/cashflow");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Rapprochement des dépenses du mois (vue « Dépenses du mois »)
+// ──────────────────────────────────────────────────────────────────────
+
+/** Vérifie qu'une transaction bancaire appartient au household ; renvoie ses infos. */
+async function ownedCashflow(householdId: string, cashflowId: string) {
+  const [row] = await db
+    .select({
+      id: schema.accountCashflow.id,
+      accountId: schema.accountCashflow.accountId,
+      notes: schema.accountCashflow.notes,
+      householdId: schema.account.householdId,
+    })
+    .from(schema.accountCashflow)
+    .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
+    .where(eq(schema.accountCashflow.id, cashflowId));
+  if (!row || row.householdId !== householdId) throw new Error("Mouvement introuvable");
+  return row;
+}
+
+const setTxCategorySchema = z.object({
+  cashflowId: z.string().min(1),
+  category: z.enum(transactionCategory),
+});
+
+/** Rapprochement vers un *type* : (re)catégorise une transaction du mois. */
+export async function setTransactionCategory(values: z.infer<typeof setTxCategorySchema>) {
+  assertWritable();
+  const p = setTxCategorySchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const row = await ownedCashflow(h.id, p.cashflowId);
+  await db
+    .update(schema.accountCashflow)
+    .set({ category: p.category, categorySource: "user", updatedAt: new Date() })
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  revalidatePath("/cashflow/expenses");
+  revalidatePath("/cashflow");
+  revalidatePath(`/accounts/${row.accountId}`);
+}
+
+const assignEnvSchema = z.object({
+  cashflowId: z.string().min(1),
+  envelopeId: z.string().min(1),
+});
+
+/**
+ * Rapprochement vers une *enveloppe* : ajoute le motif de contrepartie de la
+ * transaction aux règles de l'enveloppe choisie. Le moteur de routage (partagé
+ * avec le Safe-to-Spend) impute alors cette dépense — et les paiements
+ * similaires — à cette enveloppe.
+ */
+export async function assignTransactionToEnvelope(values: z.infer<typeof assignEnvSchema>) {
+  assertWritable();
+  const p = assignEnvSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const row = await ownedCashflow(h.id, p.cashflowId);
+
+  const pattern = merchantPattern(row.notes);
+  if (!pattern) throw new Error("Description trop courte pour créer une règle.");
+
+  const [env] = await db
+    .select({ id: schema.budgetEnvelope.id, patterns: schema.budgetEnvelope.counterpartyPatterns })
+    .from(schema.budgetEnvelope)
+    .where(
+      and(
+        eq(schema.budgetEnvelope.id, p.envelopeId),
+        eq(schema.budgetEnvelope.householdId, h.id),
+      ),
+    )
+    .limit(1);
+  if (!env) throw new Error("Enveloppe introuvable");
+
+  let existing: string[] = [];
+  if (env.patterns) {
+    try {
+      const v = JSON.parse(env.patterns);
+      if (Array.isArray(v)) existing = v.filter((x) => typeof x === "string");
+    } catch {
+      existing = [];
+    }
+  }
+  const normalized = normalizeCounterparty(pattern);
+  const already = existing.some((x) => normalizeCounterparty(x) === normalized);
+  const next = already ? existing : [...existing, pattern];
+
+  await db
+    .update(schema.budgetEnvelope)
+    .set({ counterpartyPatterns: JSON.stringify(next), updatedAt: new Date() })
+    .where(eq(schema.budgetEnvelope.id, p.envelopeId));
+
+  revalidatePath("/cashflow/expenses");
+  revalidatePath("/cashflow");
+  revalidatePath(`/cashflow/envelopes/${p.envelopeId}`);
+  return { pattern };
 }
 
 // ──────────────────────────────────────────────────────────────────────

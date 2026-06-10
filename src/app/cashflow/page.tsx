@@ -7,7 +7,15 @@ import { forecastEndOfMonth, type ForecastBand } from "@/lib/cashflow/month-fore
 import { PageHeader } from "@/components/page-header";
 import { formatEUR } from "@/lib/format";
 import { SpendButton } from "./spend-button";
-import { ArrowRight, Sparkles, Settings, CalendarRange, Droplets } from "lucide-react";
+import {
+  ArrowRight,
+  Sparkles,
+  Settings,
+  CalendarRange,
+  Droplets,
+  ChevronRight,
+  Receipt,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +73,12 @@ export default async function CashflowPage() {
         subtitle={`${monthLabel} · jour ${data.dayOfMonth}/${data.daysInMonth}`}
         action={
           <div className="flex items-center gap-2">
+            <Link
+              href="/cashflow/expenses"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
+            >
+              <Receipt className="size-3.5" /> Dépenses
+            </Link>
             <Link
               href="/cashflow/month"
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted"
@@ -327,9 +341,15 @@ function EnvelopeRow({ env }: { env: EnvelopeView }) {
   const pct = env.planned > 0 ? Math.min(100, (env.consumed / env.planned) * 100) : 0;
   const accent = COLOR_VAR[env.color];
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
+    <Link
+      href={`/cashflow/envelopes/${env.id}`}
+      className="group block rounded-lg border border-border bg-card p-3 transition-colors hover:border-foreground/30"
+    >
       <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="font-medium">{env.label}</span>
+        <span className="flex items-center gap-1 font-medium">
+          {env.label}
+          <ChevronRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
         <span className="numeric tabular-nums text-muted-foreground">
           {formatEUR(env.consumed)} / {formatEUR(env.planned)}
         </span>
@@ -340,7 +360,7 @@ function EnvelopeRow({ env }: { env: EnvelopeView }) {
           style={{ width: `${pct}%`, backgroundColor: accent }}
         />
       </div>
-    </div>
+    </Link>
   );
 }
 

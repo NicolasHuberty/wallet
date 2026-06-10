@@ -53,7 +53,7 @@ export type AffectCashflow = {
  * `null` = ce n'est PAS une dépense variable d'enveloppe (revenu, virement,
  * épargne, retrait cash) → on n'en dérive aucune consommation.
  */
-const TX_TO_ENVELOPE_CATEGORY: Record<TransactionCategory, string | null> = {
+export const TX_TO_ENVELOPE_CATEGORY: Record<TransactionCategory, string | null> = {
   income_salary: null,
   income_other: null,
   transfer_internal: null,
