@@ -1,0 +1,1 @@
+ALTER TABLE "account_cashflow" ADD COLUMN "ignored" boolean DEFAULT false NOT NULL;

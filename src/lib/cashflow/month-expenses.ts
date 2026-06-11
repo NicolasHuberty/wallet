@@ -23,6 +23,8 @@ export type MonthRawTx = {
   transferToAccountId: string | null;
   accountId: string;
   accountName: string;
+  /** Marquée « ignorée » : exclue du routage et des totaux. */
+  ignored?: boolean;
 };
 
 /** Dépense saisie à la main (espèces), non réconciliée à une transaction. */
@@ -41,8 +43,9 @@ export type MonthManualSpend = {
  *  - fixed      : couverte par une charge fixe (échéancier) — pas de la variable
  *  - buffer     : variable non rattachée → coussin / imprévu
  *  - non_spend  : sortie qui n'est pas de la dépense variable (retrait, épargne…)
+ *  - ignored    : exclue manuellement du système (ni enveloppe, ni total)
  */
-export type MonthAffectation = "envelope" | "fixed" | "buffer" | "non_spend";
+export type MonthAffectation = "envelope" | "fixed" | "buffer" | "non_spend" | "ignored";
 
 export type MonthTransaction = {
   id: string;
@@ -99,7 +102,9 @@ export function buildMonthTransactions(input: BuildMonthInput): MonthTransaction
 
     let envelopeId: string | null = null;
     let affectation: MonthAffectation;
-    if (target == null) {
+    if (t.ignored) {
+      affectation = "ignored";
+    } else if (target == null) {
       affectation = "non_spend";
     } else {
       envelopeId = resolveEnvelope(cat, t.notes, input.envelopes);

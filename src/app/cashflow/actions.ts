@@ -207,6 +207,29 @@ export async function assignTransactionToEnvelope(values: z.infer<typeof assignE
   return { pattern };
 }
 
+const ignoreSchema = z.object({
+  cashflowId: z.string().min(1),
+  ignored: z.boolean(),
+});
+
+/**
+ * Ignore (ou rétablit) une transaction : exclue de la conso d'enveloppe, du
+ * Safe-to-Spend et des totaux de dépense. Le débit reste sur le solde réel.
+ */
+export async function setTransactionIgnored(values: z.infer<typeof ignoreSchema>) {
+  assertWritable();
+  const p = ignoreSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const row = await ownedCashflow(h.id, p.cashflowId);
+  await db
+    .update(schema.accountCashflow)
+    .set({ ignored: p.ignored, updatedAt: new Date() })
+    .where(eq(schema.accountCashflow.id, p.cashflowId));
+  revalidatePath("/cashflow/expenses");
+  revalidatePath("/cashflow");
+  revalidatePath(`/accounts/${row.accountId}`);
+}
+
 const addRuleSchema = z.object({
   envelopeId: z.string().min(1),
   pattern: z.string().trim().min(2, "Motif trop court (2 caractères min)."),

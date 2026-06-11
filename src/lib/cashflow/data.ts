@@ -133,6 +133,8 @@ async function getSpendingCashflowsThisMonth(accountIds: string[], today: Date) 
         inArray(schema.accountCashflow.accountId, accountIds),
         gte(schema.accountCashflow.date, monthStart),
         lt(schema.accountCashflow.date, monthEnd),
+        // Les transactions ignorées ne consomment ni enveloppe ni coussin.
+        eq(schema.accountCashflow.ignored, false),
       ),
     );
 }
@@ -399,6 +401,7 @@ async function getBankExpensesForMonth(accountIds: string[], year: number, month
       category: schema.accountCashflow.category,
       kind: schema.accountCashflow.kind,
       transferToAccountId: schema.accountCashflow.transferToAccountId,
+      ignored: schema.accountCashflow.ignored,
     })
     .from(schema.accountCashflow)
     .innerJoin(schema.account, eq(schema.accountCashflow.accountId, schema.account.id))
@@ -451,6 +454,7 @@ async function getCurrentAccountsMonthlyTotals(
         inArray(schema.accountCashflow.accountId, accountIds),
         gte(schema.accountCashflow.date, start),
         lt(schema.accountCashflow.date, end),
+        eq(schema.accountCashflow.ignored, false),
       ),
     );
   return monthlyExpenseTotals(
@@ -531,6 +535,7 @@ export async function getMonthExpenses(
       transferToAccountId: r.transferToAccountId,
       accountId: r.accountId,
       accountName: r.accountName,
+      ignored: r.ignored,
     })),
     manual: manualRows
       .filter((s) => !s.linkedCashflowId)
@@ -548,7 +553,10 @@ export async function getMonthExpenses(
     fixedPatterns,
   });
 
-  const total = transactions.reduce((s, t) => s + t.amount, 0);
+  // Les ignorées ne comptent pas dans la dépense du mois.
+  const total = transactions
+    .filter((t) => t.affectation !== "ignored")
+    .reduce((s, t) => s + t.amount, 0);
   const unaffectedCount = transactions.filter((t) => t.affectation === "buffer").length;
 
   return {

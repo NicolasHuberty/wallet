@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Search, X, Wallet, FolderInput, SlidersHorizontal } from "lucide-react";
+import { Search, X, Wallet, FolderInput, SlidersHorizontal, EyeOff, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -37,7 +37,7 @@ import {
   type MonthTransaction,
   type TrackingBucket,
 } from "@/lib/cashflow/month-expenses";
-import { setTransactionCategory, assignTransactionToEnvelope } from "../actions";
+import { setTransactionCategory, assignTransactionToEnvelope, setTransactionIgnored } from "../actions";
 import { RuleDialog } from "./rule-dialog";
 
 type EnvelopeOption = { id: string; label: string; category: string };
@@ -52,6 +52,7 @@ const AFFECTATION_META: Record<
   fixed: { label: "Charge fixe", className: "border-border text-muted-foreground" },
   buffer: { label: "À rapprocher", className: "border-[#e08300]/50 text-[#e08300]" },
   non_spend: { label: "Hors variable", className: "border-border text-muted-foreground" },
+  ignored: { label: "Ignorée", className: "border-border text-muted-foreground line-through" },
 };
 
 const fmtMonth = (yyyymm: string) => {
@@ -99,21 +100,24 @@ export function ExpensesView({
     });
   }, [transactions, accountId, onlyToReconcile, query]);
 
-  const filteredTotal = filtered.reduce((s, t) => s + t.amount, 0);
+  // Les transactions ignorées restent visibles dans la liste mais ne comptent ni
+  // dans les totaux ni dans le suivi.
+  const spendable = useMemo(() => filtered.filter((t) => t.affectation !== "ignored"), [filtered]);
+  const filteredTotal = spendable.reduce((s, t) => s + t.amount, 0);
   const toReconcileTotal = transactions
     .filter((t) => t.affectation === "buffer")
     .reduce((s, t) => s + t.amount, 0);
 
   const chart: TrackingBucket[] = useMemo(() => {
-    if (granularity === "day") return bucketByDay(filtered);
-    if (granularity === "week") return bucketByWeek(filtered);
+    if (granularity === "day") return bucketByDay(spendable);
+    if (granularity === "week") return bucketByWeek(spendable);
     return monthlyTotals.map((m) => ({
       key: m.month,
       label: fmtMonth(m.month),
       spend: m.spend,
       count: m.count,
     }));
-  }, [granularity, filtered, monthlyTotals]);
+  }, [granularity, spendable, monthlyTotals]);
 
   const hasFilter = query.trim().length > 0 || accountId !== "all" || onlyToReconcile;
 
@@ -293,6 +297,7 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
   const router = useRouter();
   const [pending, start] = useTransition();
   const isBank = tx.source === "bank";
+  const ignored = tx.affectation === "ignored";
   const meta = AFFECTATION_META[tx.affectation];
 
   function changeCategory(category: string | null) {
@@ -322,20 +327,38 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
     });
   }
 
+  function toggleIgnore() {
+    start(async () => {
+      try {
+        await setTransactionIgnored({ cashflowId: tx.id, ignored: !ignored });
+        toast.success(ignored ? "Transaction rétablie" : "Transaction ignorée");
+        router.refresh();
+      } catch (e) {
+        toast.error((e as Error).message ?? "Erreur");
+      }
+    });
+  }
+
   return (
-    <li className={cn("flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between", pending && "opacity-50")}>
+    <li
+      className={cn(
+        "flex flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between",
+        pending && "opacity-50",
+        ignored && "opacity-55",
+      )}
+    >
       <div className="flex min-w-0 items-center gap-2.5">
         <span className="w-14 shrink-0 text-[10px] tabular-nums text-muted-foreground">
           {formatDateFR(tx.date)}
         </span>
-        {tx.category && (
+        {tx.category && !ignored && (
           <span
             className="size-2 shrink-0 rounded-full"
             style={{ background: categoryColor[tx.category as TransactionCategory] }}
           />
         )}
         <span className="min-w-0">
-          <span className="block truncate text-sm">{tx.label}</span>
+          <span className={cn("block truncate text-sm", ignored && "line-through")}>{tx.label}</span>
           <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
             {tx.accountName ?? "Saisie manuelle"}
             <span className={cn("rounded-full border px-1.5 py-px", meta.className)}>
@@ -346,7 +369,7 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
       </div>
 
       <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
-        {isBank && (
+        {isBank && !ignored && (
           <>
             <Select value={tx.category ?? undefined} onValueChange={changeCategory}>
               <SelectTrigger className="h-7 w-[7.5rem] text-[11px]">
@@ -405,9 +428,34 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
                 }
               />
             )}
+            <button
+              type="button"
+              onClick={toggleIgnore}
+              disabled={pending}
+              title="Ignorer cette transaction (exclue du budget et des totaux)"
+              className="rounded-md border border-border p-1.5 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+            >
+              <EyeOff className="size-3.5" />
+            </button>
           </>
         )}
-        <span className="numeric w-16 text-right tabular-nums font-medium text-destructive">
+        {isBank && ignored && (
+          <button
+            type="button"
+            onClick={toggleIgnore}
+            disabled={pending}
+            title="Rétablir cette transaction"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+          >
+            <Eye className="size-3.5" /> Rétablir
+          </button>
+        )}
+        <span
+          className={cn(
+            "numeric w-16 text-right tabular-nums font-medium",
+            ignored ? "text-muted-foreground line-through" : "text-destructive",
+          )}
+        >
           {formatEUR(tx.amount)}
         </span>
       </div>

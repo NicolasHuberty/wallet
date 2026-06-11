@@ -100,6 +100,21 @@ describe("buildMonthTransactions", () => {
     expect(out[0].affectation).toBe("buffer");
   });
 
+  it("exclut une transaction ignorée (affectation 'ignored', aucune enveloppe)", () => {
+    const t = bank("ign", -90, "shopping", "UNIQLO EUROPE");
+    t.ignored = true;
+    const out = buildMonthTransactions({
+      bank: [t],
+      manual: [],
+      envelopes: ENVS,
+      envelopeMeta: META,
+      fixedCategories: new Set(),
+      fixedPatterns: [],
+    });
+    expect(out[0].affectation).toBe("ignored");
+    expect(out[0].envelopeId).toBeNull();
+  });
+
   it("marque un retrait cash comme non_spend (sortie hors variable)", () => {
     const out = buildMonthTransactions({
       bank: [bank("atm", -100, "cash_withdrawal", "ATM RETRAIT")],

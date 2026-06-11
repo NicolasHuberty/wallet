@@ -586,6 +586,10 @@ export const accountCashflow = pgTable(
     // Réconciliation d'une charge fixe récurrente (loyer, mutuelle) — symétrique
     // de linkedOneOffChargeId. Exclut le débit de la conso d'enveloppe.
     linkedRecurringExpenseId: text("linked_recurring_expense_id"),
+    // Ignorée par le moteur de cash-flow : exclue de la conso d'enveloppe, du
+    // Safe-to-Spend et des totaux de dépense (ex. remboursement à venir, frais
+    // pro, mouvement non pertinent). Le débit reste sur le solde réel.
+    ignored: boolean("ignored").notNull().default(false),
     ...timestamps,
   },
   (t) => [
