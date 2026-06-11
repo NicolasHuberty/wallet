@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Search, X, Wallet, FolderInput } from "lucide-react";
+import { Search, X, Wallet, FolderInput, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { formatEUR, formatDateFR } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -32,11 +32,13 @@ import type { MonthlySpend } from "@/lib/account-analytics";
 import {
   bucketByDay,
   bucketByWeek,
+  merchantPattern,
   type MonthAffectation,
   type MonthTransaction,
   type TrackingBucket,
 } from "@/lib/cashflow/month-expenses";
 import { setTransactionCategory, assignTransactionToEnvelope } from "../actions";
+import { RuleDialog } from "./rule-dialog";
 
 type EnvelopeOption = { id: string; label: string; category: string };
 type AccountOption = { id: string; name: string };
@@ -386,6 +388,22 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
                   ))}
                 </SelectContent>
               </Select>
+            )}
+            {envelopes.length > 0 && (
+              <RuleDialog
+                envelopes={envelopes}
+                initialPattern={merchantPattern(tx.label) ?? ""}
+                initialEnvelopeId={tx.envelopeId}
+                trigger={
+                  <button
+                    type="button"
+                    title="Créer une règle (motif personnalisé → enveloppe)"
+                    className="rounded-md border border-border p-1.5 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+                  >
+                    <SlidersHorizontal className="size-3.5" />
+                  </button>
+                }
+              />
             )}
           </>
         )}

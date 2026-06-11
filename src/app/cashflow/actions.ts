@@ -153,28 +153,16 @@ const assignEnvSchema = z.object({
 });
 
 /**
- * Rapprochement vers une *enveloppe* : ajoute le motif de contrepartie de la
- * transaction aux règles de l'enveloppe choisie. Le moteur de routage (partagé
- * avec le Safe-to-Spend) impute alors cette dépense — et les paiements
- * similaires — à cette enveloppe.
+ * Ajoute un motif de contrepartie aux règles d'une enveloppe (dédup par forme
+ * normalisée). Le moteur de routage (partagé avec le Safe-to-Spend) impute alors
+ * les dépenses dont le libellé contient ce motif à cette enveloppe.
  */
-export async function assignTransactionToEnvelope(values: z.infer<typeof assignEnvSchema>) {
-  assertWritable();
-  const p = assignEnvSchema.parse(values);
-  const h = await getPrimaryHousehold();
-  const row = await ownedCashflow(h.id, p.cashflowId);
-
-  const pattern = merchantPattern(row.notes);
-  if (!pattern) throw new Error("Description trop courte pour créer une règle.");
-
+async function appendPatternToEnvelope(householdId: string, envelopeId: string, pattern: string) {
   const [env] = await db
     .select({ id: schema.budgetEnvelope.id, patterns: schema.budgetEnvelope.counterpartyPatterns })
     .from(schema.budgetEnvelope)
     .where(
-      and(
-        eq(schema.budgetEnvelope.id, p.envelopeId),
-        eq(schema.budgetEnvelope.householdId, h.id),
-      ),
+      and(eq(schema.budgetEnvelope.id, envelopeId), eq(schema.budgetEnvelope.householdId, householdId)),
     )
     .limit(1);
   if (!env) throw new Error("Enveloppe introuvable");
@@ -195,12 +183,47 @@ export async function assignTransactionToEnvelope(values: z.infer<typeof assignE
   await db
     .update(schema.budgetEnvelope)
     .set({ counterpartyPatterns: JSON.stringify(next), updatedAt: new Date() })
-    .where(eq(schema.budgetEnvelope.id, p.envelopeId));
+    .where(eq(schema.budgetEnvelope.id, envelopeId));
 
   revalidatePath("/cashflow/expenses");
   revalidatePath("/cashflow");
-  revalidatePath(`/cashflow/envelopes/${p.envelopeId}`);
+  revalidatePath(`/cashflow/envelopes/${envelopeId}`);
+}
+
+/**
+ * Rapprochement *rapide* vers une enveloppe : motif déduit automatiquement de la
+ * transaction (les 2 premiers tokens du marchand).
+ */
+export async function assignTransactionToEnvelope(values: z.infer<typeof assignEnvSchema>) {
+  assertWritable();
+  const p = assignEnvSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  const row = await ownedCashflow(h.id, p.cashflowId);
+
+  const pattern = merchantPattern(row.notes);
+  if (!pattern) throw new Error("Description trop courte pour créer une règle.");
+
+  await appendPatternToEnvelope(h.id, p.envelopeId, pattern);
   return { pattern };
+}
+
+const addRuleSchema = z.object({
+  envelopeId: z.string().min(1),
+  pattern: z.string().trim().min(2, "Motif trop court (2 caractères min)."),
+});
+
+/**
+ * Crée une règle *personnalisée* : l'utilisateur définit lui-même le motif
+ * (texte recherché dans le libellé, insensible casse/accents) à lier à une
+ * enveloppe. Toutes les transactions correspondantes — présentes et futures —
+ * y seront automatiquement imputées.
+ */
+export async function addEnvelopeRule(values: z.infer<typeof addRuleSchema>) {
+  assertWritable();
+  const p = addRuleSchema.parse(values);
+  const h = await getPrimaryHousehold();
+  await appendPatternToEnvelope(h.id, p.envelopeId, p.pattern.trim());
+  return { pattern: p.pattern.trim() };
 }
 
 // ──────────────────────────────────────────────────────────────────────
