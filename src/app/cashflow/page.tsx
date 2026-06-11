@@ -203,10 +203,17 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-        <MiniStat label="Revenus" value={data.plannedIncome} tone="positive" />
+        <MiniStat label="Revenus du mois" value={data.plannedIncome} tone="positive" />
         <MiniStat label="Fixes" value={data.plannedFixed} tone="negative" />
         <MiniStat label="Coussin restant" value={data.bufferRemaining} />
       </div>
+
+      {data.nextMonthIncome > 0 && (
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{formatEUR(data.nextMonthIncome)}</span>{" "}
+          versés ce mois sont réservés au mois prochain — non comptés ici.
+        </p>
+      )}
 
       {/* D'où vient ce chiffre ? */}
       <details className="mt-4 border-t border-border pt-3 text-sm">
@@ -228,6 +235,13 @@ function Hero({ data, forecast }: { data: CashflowDashboard; forecast: ForecastB
             {formatEUR(data.remainingIncome)}) ne sont pas ajoutés ici : quand ils tombent, ils
             remplissent ton solde — les compter en plus reviendrait à compter ton salaire deux
             fois. Solde de fin de mois projeté : {formatEUR(data.safe.projectedEndBalance)}.
+            {data.nextMonthIncome > 0 && (
+              <>
+                {" "}
+                Les {formatEUR(data.nextMonthIncome)} versés en fin de mois sont réservés au mois
+                prochain et exclus de cette projection.
+              </>
+            )}
           </p>
         </div>
       </details>

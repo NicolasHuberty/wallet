@@ -1,0 +1,1 @@
+ALTER TABLE "recurring_income" ADD COLUMN "paid_in_advance" boolean DEFAULT false NOT NULL;

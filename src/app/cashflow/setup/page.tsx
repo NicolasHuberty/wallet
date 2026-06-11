@@ -37,6 +37,7 @@ export default async function CashflowSetupPage() {
     dayOfMonth: i.dayOfMonth,
     isVariable: i.isVariable,
     floorAmount: i.floorAmount,
+    paidInAdvance: i.paidInAdvance,
   }));
 
   const profile: ProfileData = {

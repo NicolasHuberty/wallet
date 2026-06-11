@@ -445,6 +445,7 @@ const incomeSchema = z.object({
   dayOfMonth: z.coerce.number().int().min(1).max(31).nullable().optional(),
   isVariable: z.boolean().default(false),
   floorAmount: z.coerce.number().min(0).nullable().optional(),
+  paidInAdvance: z.boolean().default(false),
 });
 
 /** Crée ou met à jour une source de revenu. */
@@ -459,6 +460,7 @@ export async function saveIncomeSource(values: z.infer<typeof incomeSchema>) {
     dayOfMonth: p.dayOfMonth ?? null,
     isVariable: p.isVariable,
     floorAmount: p.isVariable ? p.floorAmount ?? null : null,
+    paidInAdvance: p.paidInAdvance,
     updatedAt: new Date(),
   };
 

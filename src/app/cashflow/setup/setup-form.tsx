@@ -50,6 +50,7 @@ export type IncomeData = {
   dayOfMonth: number | null;
   isVariable: boolean;
   floorAmount: number | null;
+  paidInAdvance: boolean;
 };
 
 export type FixedChargeData = {
@@ -312,6 +313,7 @@ function IncomeCard({ income }: { income?: IncomeData }) {
   const [day, setDay] = useState(income?.dayOfMonth ? String(income.dayOfMonth) : "");
   const [isVariable, setIsVariable] = useState(income?.isVariable ?? false);
   const [floor, setFloor] = useState(income?.floorAmount ? String(income.floorAmount) : "");
+  const [paidInAdvance, setPaidInAdvance] = useState(income?.paidInAdvance ?? false);
   const [pending, start] = useTransition();
 
   function save() {
@@ -328,6 +330,7 @@ function IncomeCard({ income }: { income?: IncomeData }) {
           dayOfMonth: day === "" ? null : Number(day),
           isVariable,
           floorAmount: isVariable ? Number(floor) || 0 : null,
+          paidInAdvance,
         });
         toast.success(isNew ? "Revenu ajouté" : "Revenu mis à jour");
         if (isNew) {
@@ -434,6 +437,16 @@ function IncomeCard({ income }: { income?: IncomeData }) {
           )}
         </div>
       </div>
+      <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={paidInAdvance}
+          onChange={(e) => setPaidInAdvance(e.target.checked)}
+          className="size-3.5 accent-foreground"
+        />
+        Versé pour le mois suivant (ex. salaire payé le 28 qui finance le mois prochain) — exclu du
+        mois courant.
+      </label>
       {isVariable && (
         <div className="mt-2 grid gap-1.5 md:max-w-[12rem]">
           <Label className="text-[11px] text-muted-foreground">Plancher garanti / mois</Label>

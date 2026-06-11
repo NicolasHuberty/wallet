@@ -23,6 +23,8 @@ export type IncomeRow = {
   floorAmount: number | null;
   startDate: Date;
   endDate: Date | null;
+  /** Versé d'avance : finance le mois suivant → exclu du mois courant. */
+  paidInAdvance?: boolean;
 };
 
 export type FixedExpenseRow = {
@@ -104,6 +106,8 @@ export type CashflowDashboard = {
   committedSavings: number;
   /** Revenus datés encore à venir ce mois (composante du Safe-to-Spend). */
   remainingIncome: number;
+  /** Revenus versés d'avance ce mois mais réservés au mois suivant. */
+  nextMonthIncome: number;
   /** Charges fixes datées encore à venir ce mois. */
   remainingFixed: number;
   /** Reste des enveloppes variables (planifié − consommé). */
@@ -166,9 +170,19 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
   // ── Revenus ────────────────────────────────────────────────────────
   let plannedIncome = 0;
   let remainingIncome = 0;
+  let nextMonthIncome = 0;
   const upcoming: UpcomingItem[] = [];
   for (const i of input.incomes) {
     const flow = incomeFlow(i);
+    // Revenu versé d'avance : il tombe ce mois mais finance le mois SUIVANT.
+    // On l'exclut du mois courant (revenus, à-venir, projection) et on le
+    // comptabilise à part pour information.
+    if (i.paidInAdvance) {
+      for (const o of expandOccurrences(flow, year, month0)) {
+        nextMonthIncome += o.amount;
+      }
+      continue;
+    }
     for (const o of expandOccurrences(flow, year, month0)) {
       plannedIncome += o.amount;
     }
@@ -272,6 +286,7 @@ export function assembleDashboard(input: AssembleInput): CashflowDashboard {
     plannedVariable,
     committedSavings: input.committedSavings,
     remainingIncome,
+    nextMonthIncome,
     remainingFixed,
     variableRemaining,
     bufferRemaining,

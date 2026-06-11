@@ -197,6 +197,7 @@ export async function getCashflowDashboard(
     floorAmount: i.floorAmount,
     startDate: i.startDate,
     endDate: i.endDate,
+    paidInAdvance: i.paidInAdvance,
   }));
 
   const fixedExpenses: FixedExpenseRow[] = expensesRaw.map((e) => ({

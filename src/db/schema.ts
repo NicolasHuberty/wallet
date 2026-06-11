@@ -372,6 +372,10 @@ export const recurringIncome = pgTable(
     // the surplus overflows to savings when actually received.
     isVariable: boolean("is_variable").notNull().default(false),
     floorAmount: real("floor_amount"),
+    // Versé d'avance : le revenu tombe ce mois mais finance le mois SUIVANT
+    // (ex. salaire payé le 28 pour le mois prochain). Exclu du mois courant
+    // (revenus, projection, timeline) ; comptabilisé comme revenu du mois suivant.
+    paidInAdvance: boolean("paid_in_advance").notNull().default(false),
     ...timestamps,
   },
   (t) => [index("recurring_income_household_id_idx").on(t.householdId)],
