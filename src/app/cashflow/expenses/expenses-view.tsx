@@ -348,7 +348,13 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
           <>
             <Select value={tx.category ?? undefined} onValueChange={changeCategory}>
               <SelectTrigger className="h-7 w-[7.5rem] text-[11px]">
-                <SelectValue placeholder="Type" />
+                <SelectValue placeholder="Type">
+                  {(v) =>
+                    typeof v === "string" && v
+                      ? categoryLabel[v as TransactionCategory] ?? v
+                      : "Type"
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {transactionCategory.map((c) => (
@@ -363,7 +369,13 @@ function TxRow({ tx, envelopes }: { tx: MonthTransaction; envelopes: EnvelopeOpt
                 <SelectTrigger className="h-7 w-[7.5rem] text-[11px]">
                   <span className="flex items-center gap-1 truncate">
                     <Wallet className="size-3 shrink-0" />
-                    <SelectValue placeholder="Enveloppe" />
+                    <SelectValue placeholder="Enveloppe">
+                      {(v) =>
+                        (typeof v === "string"
+                          ? envelopes.find((e) => e.id === v)?.label
+                          : null) ?? "Enveloppe"
+                      }
+                    </SelectValue>
                   </span>
                 </SelectTrigger>
                 <SelectContent>
